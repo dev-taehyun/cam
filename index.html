@@ -2,29 +2,52 @@
 <html lang="ko">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="theme-color" content="#000000">
-  <title>Gesture Camera</title>
+  <title>Camera</title>
   <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    html, body { 
-      width: 100%; 
-      height: 100%; 
-      background: #000; 
-      overflow: hidden; 
-      font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', sans-serif;
-      -webkit-tap-highlight-color: transparent;
-      touch-action: none; 
+    *, *::before, *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
     }
 
-    #viewfinder { position: fixed; inset: 0; width: 100%; height: 100%; object-fit: cover; z-index: 1; }
-    #flash { position: fixed; inset: 0; background: #fff; opacity: 0; pointer-events: none; z-index: 10; transition: opacity 0.05s; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      background: #000;
+      overflow: hidden;
+      font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', sans-serif;
+    }
+
+    /* ── Viewfinder ── */
+    #viewfinder {
+      position: fixed;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      background: #000;
+    }
+
+    /* ── Flash overlay ── */
+    #flash {
+      position: fixed;
+      inset: 0;
+      background: #fff;
+      opacity: 0;
+      pointer-events: none;
+      z-index: 10;
+      transition: opacity 0.05s ease;
+    }
     #flash.on { opacity: 1; }
+
+    /* ── Hidden canvas for capture ── */
     #canvas { display: none; }
 
-    /* ── 카메라 권한 요청 화면 스타일 ── */
+    /* ── Start screen ── */
     #start-screen {
       position: fixed;
       inset: 0;
@@ -33,19 +56,20 @@
       align-items: center;
       justify-content: center;
       background: #000;
-      /* ⭐ 초기 상태를 display: none으로 두고, 권한이 없을 때만 띄우는 역발상 구조 */
-      display: none; 
       z-index: 50;
       gap: 16px;
     }
-    #start-screen svg { opacity: 0.5; }
+
+    #start-screen svg {
+      opacity: 0.5;
+    }
+
     #start-label {
       color: rgba(255,255,255,0.5);
       font-size: 14px;
       letter-spacing: 0.08em;
-      text-align: center;
-      line-height: 1.6;
     }
+
     #open-camera-btn {
       margin-top: 8px;
       background: rgba(255,255,255,0.12);
@@ -61,116 +85,205 @@
     }
     #open-camera-btn:hover { background: rgba(255,255,255,0.2); }
 
-    /* ── 플로팅 줌 인디케이터 배지 ── */
-    #zoom-indicator {
+    /* ── Top bar overlay ── */
+    #top-bar {
       position: fixed;
-      top: 15%;
-      left: 50%;
-      transform: translateX(-50%);
-      background: rgba(0, 0, 0, 0.6);
-      color: #fff;
-      padding: 6px 14px;
-      border-radius: 20px;
-      font-size: 14px;
-      font-weight: 600;
-      backdrop-filter: blur(10px);
-      border: 1px solid rgba(255,255,255,0.1);
-      letter-spacing: 0.05em;
-      z-index: 30;
-      opacity: 0;
-      transition: opacity 0.3s ease;
-      pointer-events: none;
+      top: 0;
+      left: 0;
+      right: 0;
+      padding: 24px 20px 0;
+      display: flex;
+      align-items: center;
+      justify-content: center; /* 토글을 상단 중앙에 배치 */
+      z-index: 20;
+      background: linear-gradient(to bottom, rgba(0,0,0,0.45) 0%, transparent 100%);
     }
-    #zoom-indicator.show { opacity: 1; }
 
-    /* ── 하단 컨트롤 레이아웃 ── */
+    /* ── Bottom controls overlay ── */
     #bottom-bar {
       position: fixed;
-      bottom: 0; left: 0; right: 0;
-      padding-bottom: calc(24px + env(safe-area-inset-bottom));
-      display: none; 
-      flex-direction: column;
-      align-items: center;
-      z-index: 20;
-      background: linear-gradient(to top, rgba(0,0,0,0.8) 0%, rgba(0,0,0,0.2) 70%, transparent 100%);
-    }
-
-    /* ── 버튼 그룹 ── */
-    #action-row {
-      width: 100%;
-      padding: 0 36px;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      padding: 0 32px 40px;
       display: flex;
       align-items: center;
       justify-content: space-between;
+      z-index: 20;
+      background: linear-gradient(to top, rgba(0,0,0,0.55) 0%, transparent 100%);
     }
+
+    /* Shutter button */
     #shutter {
-      width: 76px; height: 76px;
+      width: 72px;
+      height: 72px;
       border-radius: 50%;
       background: transparent;
-      border: 4px solid #fff;
+      border: 3px solid #fff;
       cursor: pointer;
       position: relative;
+      flex-shrink: 0;
+      transition: transform 0.08s ease;
+      pointer-events: all;
     }
     #shutter::after {
-      content: ''; position: absolute; inset: 4px;
-      border-radius: 50%; background: #fff;
-      transition: transform 0.1s;
+      content: '';
+      position: absolute;
+      inset: 5px;
+      border-radius: 50%;
+      background: #fff;
+      transition: transform 0.08s ease, opacity 0.08s ease;
     }
-    #shutter:active::after { transform: scale(0.88); }
+    #shutter:active { transform: scale(0.92); }
+    #shutter:active::after { transform: scale(0.88); opacity: 0.85; }
 
-    #thumbnail-slot {
-      width: 46px; height: 46px; border-radius: 50%;
-      border: 2px solid rgba(255,255,255,0.7);
-      overflow: hidden; background: rgba(0,0,0,0.5); cursor: pointer;
-    }
-    #thumbnail-slot img { width: 100%; height: 100%; object-fit: cover; display: none; }
-
+    /* Camera flip button */
     #flip-btn {
-      width: 46px; height: 46px; border-radius: 50%;
-      background: rgba(255,255,255,0.15); border: none;
-      display: flex; align-items: center; justify-content: center; backdrop-filter: blur(10px);
+      width: 44px;
+      height: 44px;
+      border-radius: 50%;
+      background: rgba(0,0,0,0.35);
+      border: none;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      backdrop-filter: blur(8px);
+      transition: background 0.15s, transform 0.3s ease;
+      pointer-events: all;
+    }
+    #flip-btn:hover { background: rgba(0,0,0,0.5); }
+    #flip-btn.flipping { transform: rotate(180deg); }
+
+    /* Last thumbnail placeholder */
+    #thumbnail-slot {
+      width: 44px;
+      height: 44px;
+      border-radius: 8px;
+      border: 2px solid rgba(255,255,255,0.6);
+      overflow: hidden;
+      background: rgba(255,255,255,0.05);
+      cursor: pointer;
+      pointer-events: all;
+    }
+    #thumbnail-slot img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: none;
     }
 
+    /* ── Save toggle ── */
     #save-toggle-wrap {
-      display: flex; align-items: center; gap: 8px; margin-bottom: 20px;
-      background: rgba(0,0,0,0.5); padding: 5px 14px; border-radius: 20px;
-      border: 1px solid rgba(255,255,255,0.08);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+      pointer-events: all;
     }
-    #save-toggle-label { color: rgba(255,255,255,0.6); font-size: 12px; font-weight: 500; }
-    #save-toggle-wrap.active #save-toggle-label { color: #fff; }
-    #save-toggle { position: relative; width: 42px; height: 24px; }
-    #save-toggle input { opacity: 0; width: 0; height: 0; position: absolute; }
-    .toggle-track { position: absolute; inset: 0; border-radius: 100px; background: rgba(255,255,255,0.2); transition: background 0.2s; }
-    #save-toggle input:checked + .toggle-track { background: #30d158; }
-    .toggle-thumb { position: absolute; top: 2px; left: 2px; width: 20px; height: 20px; border-radius: 50%; background: #fff; transition: transform 0.2s; }
-    #save-toggle input:checked ~ .toggle-thumb { transform: translateX(18px); }
 
-    /* ── 임시 갤러리 뷰어 ── */
-    #gallery-viewer { position: fixed; inset: 0; background: #000; z-index: 100; display: none; user-select: none; }
-    #viewer-header {
-      position: absolute; top: 0; left: 0; right: 0; height: 70px; padding: 0 24px;
-      display: flex; align-items: center; justify-content: space-between;
-      background: linear-gradient(to bottom, rgba(0,0,0,0.6), transparent); z-index: 110;
+    #save-toggle-label {
+      font-size: 10px;
+      font-weight: 500;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: rgba(255,255,255,0.55);
+      transition: color 0.2s;
+      user-select: none;
     }
-    #viewer-close, #viewer-download { background: transparent; border: none; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.8)); }
-    #viewer-counter { color: #fff; font-size: 16px; font-weight: 600; text-shadow: 0 2px 4px rgba(0,0,0,0.8); }
-    #swipe-container { display: flex; width: 100%; height: 100%; will-change: transform; }
-    .swipe-slide { min-width: 100%; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; overflow: hidden; }
-    .swipe-slide img { max-width: 100%; max-height: 100%; object-fit: contain; pointer-events: none; }
+    #save-toggle-wrap.active #save-toggle-label {
+      color: rgba(255,255,255,0.9);
+    }
 
+    /* The toggle pill */
+    #save-toggle {
+      position: relative;
+      width: 44px;
+      height: 26px;
+      cursor: pointer;
+    }
+    #save-toggle input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+      position: absolute;
+    }
+    .toggle-track {
+      position: absolute;
+      inset: 0;
+      border-radius: 100px;
+      background: rgba(255,255,255,0.15);
+      border: 1px solid rgba(255,255,255,0.2);
+      transition: background 0.22s ease, border-color 0.22s ease;
+    }
+    #save-toggle input:checked + .toggle-track {
+      background: #30d158;
+      border-color: #30d158;
+    }
+    .toggle-thumb {
+      position: absolute;
+      top: 3px;
+      left: 3px;
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: #fff;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.35);
+      transition: transform 0.22s cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
+    #save-toggle input:checked ~ .toggle-thumb {
+      transform: translateX(18px);
+    }
+
+    /* ── Toast ── */
     #toast {
-      position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
-      background: rgba(0,0,0,0.85); color: #fff; padding: 12px 28px; border-radius: 100px;
-      font-size: 14px; font-weight: 500; z-index: 120; opacity: 0; pointer-events: none;
-      transition: opacity 0.2s; backdrop-filter: blur(10px);
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%) scale(0.9);
+      background: rgba(0,0,0,0.75);
+      color: #fff;
+      padding: 12px 24px;
+      border-radius: 100px;
+      font-size: 14px;
+      font-weight: 500;
+      letter-spacing: 0.03em;
+      z-index: 60;
+      opacity: 0;
+      pointer-events: none;
+      backdrop-filter: blur(10px);
+      transition: opacity 0.2s ease, transform 0.2s ease;
     }
-    #toast.show { opacity: 1; }
+    #toast.show {
+      opacity: 1;
+      transform: translate(-50%, -50%) scale(1);
+    }
+
+    /* ── Error ── */
+    #error-msg {
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      color: rgba(255,255,255,0.7);
+      font-size: 14px;
+      text-align: center;
+      padding: 0 32px;
+      z-index: 55;
+      display: none;
+      line-height: 1.6;
+    }
+
+    /* Hidden on start screen */
+    #top-bar, #bottom-bar { display: none; }
   </style>
 </head>
 <body>
 
   <video id="viewfinder" autoplay playsinline muted></video>
+
   <div id="flash"></div>
+
   <canvas id="canvas"></canvas>
 
   <div id="start-screen">
@@ -182,345 +295,177 @@
     <button id="open-camera-btn">카메라 열기</button>
   </div>
 
-  <div id="zoom-indicator">1.0x</div>
-
-  <div id="bottom-bar">
+  <div id="top-bar">
     <div id="save-toggle-wrap">
-      <span id="save-toggle-label">자동 저장</span>
-      <label id="save-toggle" for="save-checkbox">
+      <label id="save-toggle" for="save-checkbox" aria-label="저장">
         <input type="checkbox" id="save-checkbox">
         <span class="toggle-track"></span>
         <span class="toggle-thumb"></span>
       </label>
-    </div>
-
-    <div id="action-row">
-      <div id="thumbnail-slot">
-        <img id="thumbnail" alt="미리보기">
-      </div>
-      <button id="shutter" aria-label="촬영"></button>
-      <button id="flip-btn" aria-label="전환">
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2">
-          <path d="M21.5 2v6h-6M2.5 22v-6h6M20 11.5A8.5 8.5 0 0 0 5.05 6.5L2.5 9m19 6l-2.55 2.5A8.5 8.5 0 0 1 4 12.5"/>
-        </svg>
-      </button>
+      <span id="save-toggle-label">저장</span>
     </div>
   </div>
 
-  <div id="gallery-viewer">
-    <div id="viewer-header">
-      <button id="viewer-close">
-        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5">
-          <line x1="18" y1="6" x2="6" y2="18"></line>
-          <line x1="6" y1="6" x2="18" y2="18"></line>
-        </svg>
-      </button>
-      <div id="viewer-counter">0 / 0</div>
-      <button id="viewer-download">
-        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5">
-          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v4M7 10l5 5 5-5M12 15V3"></path>
-        </svg>
-      </button>
+  <div id="bottom-bar">
+    <div id="thumbnail-slot">
+      <img id="thumbnail" alt="마지막 사진">
     </div>
-    <div id="swipe-container"></div>
+
+    <button id="shutter" aria-label="촬영"></button>
+
+    <button id="flip-btn" aria-label="카메라 전환">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M1 4v6h6"/>
+        <path d="M23 20v-6h-6"/>
+        <path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10"/>
+        <path d="M3.51 15a9 9 0 0 0 14.85 3.36L23 14"/>
+      </svg>
+    </button>
   </div>
 
   <div id="toast"></div>
 
+  <div id="error-msg"></div>
+
   <script>
     'use strict';
 
-    const viewfinder = document.getElementById('viewfinder');
-    const canvas = document.getElementById('canvas');
-    const flash = document.getElementById('flash');
-    const startScreen = document.getElementById('start-screen');
-    const startLabel = document.getElementById('start-label');
-    const openBtn = document.getElementById('open-camera-btn');
-    const bottomBar = document.getElementById('bottom-bar');
-    const shutter = document.getElementById('shutter');
-    const flipBtn = document.getElementById('flip-btn');
-    const thumbnailEl = document.getElementById('thumbnail');
-    const saveCheckbox = document.getElementById('save-checkbox');
+    const viewfinder    = document.getElementById('viewfinder');
+    const canvas        = document.getElementById('canvas');
+    const flash         = document.getElementById('flash');
+    const startScreen   = document.getElementById('start-screen');
+    const startLabel    = document.getElementById('start-label');
+    const openBtn       = document.getElementById('open-camera-btn');
+    const topBar        = document.getElementById('top-bar');
+    const bottomBar     = document.getElementById('bottom-bar');
+    const shutter       = document.getElementById('shutter');
+    const flipBtn       = document.getElementById('flip-btn');
+    const thumbnailEl   = document.getElementById('thumbnail');
+    const saveCheckbox  = document.getElementById('save-checkbox');
     const saveToggleWrap = document.getElementById('save-toggle-wrap');
-    const toastEl = document.getElementById('toast');
-    
-    const zoomIndicator = document.getElementById('zoom-indicator');
+    const toastEl       = document.getElementById('toast');
+    const errorEl       = document.getElementById('error-msg');
 
-    const galleryViewer = document.getElementById('gallery-viewer');
-    const swipeContainer = document.getElementById('swipe-container');
-    const viewerClose = document.getElementById('viewer-close');
-    const viewerDownload = document.getElementById('viewer-download');
-    const viewerCounter = document.getElementById('viewer-counter');
+    let currentStream = null;
+    let facingMode    = 'environment';
+    let toastTimer    = null;
 
-    let currentStream = null, videoTrack = null, facingMode = 'environment', toastTimer = null, zoomFadeTimer = null;
-    let photosArray = [], currentSlideIndex = 0;
-    
-    let zoomCaps = { min: 1, max: 1 };
-    let globalZoomVal = 1.0;
-
-    // 페이지 확대 제스처 원천 차단
-    document.addEventListener('touchstart', (e) => {
-      if (e.touches.length > 1) e.preventDefault();
-    }, { passive: false });
-
-    document.addEventListener('touchmove', (e) => {
-      if (e.touches.length > 1) e.preventDefault();
-    }, { passive: false });
-
-    let lastTouchTime = 0;
-    document.addEventListener('touchend', (e) => {
-      const now = Date.now();
-      if (now - lastTouchTime <= 300) e.preventDefault();
-      lastTouchTime = now;
-    }, { passive: false });
-
-    saveCheckbox.addEventListener('change', () => saveToggleWrap.classList.toggle('active', saveCheckbox.checked));
-
-    // ── ⚡ 초고속 핵심 카메라 제어 파이프라인 ──
-    async function initCameraDevice(isSilent = false) {
-      if (currentStream) currentStream.getTracks().forEach(t => t.stop());
-      
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          audio: false, 
-          video: { 
-            facingMode: facingMode, 
-            width: { ideal: 1920 }, 
-            height: { ideal: 1080 } 
-          }
-        });
-        
-        currentStream = stream;
-        viewfinder.srcObject = stream;
-        await viewfinder.play();
-        videoTrack = stream.getVideoTracks()[0];
-        
-        // 카메라가 정상 연동되면 즉시 UI 활성화 및 안내 스크린 숨김
-        startScreen.style.display = 'none';
-        bottomBar.style.display = 'flex';
-        
-        parseZoomCapabilities();
-      } catch (err) {
-        // ⚡ 초고속 선행 시도 중 에러가 나면 비로소 권한 요청 화면을 노출시킴 (레이턴시 최소화)
-        if (isSilent) {
-          startScreen.style.display = 'flex';
-          return;
-        }
-
-        startScreen.style.display = 'flex';
-        if (err.name === 'NotAllowedError') {
-          startLabel.innerHTML = '카메라 권한이 거부되었습니다.<br>브라우저 설정에서 카메라 접근을 허용해 주세요.';
-        } else {
-          startLabel.innerText = '카메라를 연결할 수 없습니다.';
-        }
-      }
-    }
-
-    // ── ⚡ [최적화 핵심] 초고속 선행 기동 (Pre-flight Execution) ──
-    // HTML 파싱 및 DOM 빌드가 완료되는 순간(window.load까지 기다리지 않음) 즉시 비동기 스레드 실행
-    if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', () => initCameraDevice(true));
-    } else {
-      initCameraDevice(true);
-    }
-
-    openBtn.addEventListener('click', () => {
-      initCameraDevice(false);
+    // Sync toggle wrapper active class for label color
+    saveCheckbox.addEventListener('change', () => {
+      saveToggleWrap.classList.toggle('active', saveCheckbox.checked);
     });
 
-    async function changeCameraDirection(facing) {
-      if (currentStream) currentStream.getTracks().forEach(t => t.stop());
+    // ── Camera init ──────────────────────────────────────────
+    async function startCamera(facing = facingMode) {
+      if (currentStream) {
+        currentStream.getTracks().forEach(t => t.stop());
+      }
+      const constraints = {
+        audio: false,
+        video: { facingMode: facing, width: { ideal: 1920 }, height: { ideal: 1080 } }
+      };
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          audio: false, video: { facingMode: facing, width: { ideal: 1920 }, height: { ideal: 1080 } }
-        });
+        const stream = await navigator.mediaDevices.getUserMedia(constraints);
+        window.stream = stream;
         currentStream = stream;
         viewfinder.srcObject = stream;
-        await viewfinder.play();
-        videoTrack = stream.getVideoTracks()[0];
         facingMode = facing;
-        parseZoomCapabilities();
-      } catch (e) {
-        console.error("카메라 전환 실패", e);
+        startScreen.style.display = 'none';
+        topBar.style.display = 'flex';
+        bottomBar.style.display = 'flex';
+        errorEl.style.display = 'none';
+      } catch (err) {
+        showError(err);
       }
     }
 
-    // 하드웨어 디바이스 실제 동기화 수치 로드
-    function parseZoomCapabilities() {
-      if (!videoTrack) return;
-      const capabilities = videoTrack.getCapabilities ? videoTrack.getCapabilities() : {};
-      
-      if ('zoom' in capabilities) {
-        zoomCaps.min = capabilities.zoom.min || 1;
-        zoomCaps.max = capabilities.zoom.max || 5;
-        
-        const settings = videoTrack.getSettings();
-        globalZoomVal = settings.zoom || zoomCaps.min;
-        
-        syncRealHardwareZoomValue(); 
-      } else {
-        zoomCaps.min = 1; zoomCaps.max = 1; globalZoomVal = 1.0;
+    function showError(err) {
+      let msg = '카메라를 열 수 없습니다.';
+      if (err.name === 'NotAllowedError') {
+        msg = '카메라 권한이 거부되었습니다.<br>브라우저 설정에서 카메라 접근을 허용해 주세요.';
+      } else if (err.name === 'NotFoundError') {
+        msg = '카메라를 찾을 수 없습니다.';
       }
+      startLabel.innerHTML = msg;
+      startScreen.style.display = 'flex';
+      topBar.style.display = 'none';
+      bottomBar.style.display = 'none';
     }
 
-    // 실제 하드웨어 미디어 세팅값을 실시간 역추적해 화면에 반영
-    function syncRealHardwareZoomValue() {
-      if (!videoTrack) return;
-      const currentSettings = videoTrack.getSettings();
-      if ('zoom' in currentSettings) {
-        const realHardwareZoom = currentSettings.zoom;
-        zoomIndicator.textContent = realHardwareZoom.toFixed(1) + 'x';
-      }
-    }
+    openBtn.addEventListener('click', () => startCamera('environment'));
 
-    // 제스처 값 하드웨어 인젝션 처리
-    async function applyHardwareZoom(val) {
-      if (!videoTrack || zoomCaps.min === zoomCaps.max) return;
-      
-      if (val < zoomCaps.min) val = zoomCaps.min;
-      if (val > zoomCaps.max) val = zoomCaps.max;
-      globalZoomVal = val;
-
-      try {
-        await videoTrack.applyConstraints({ advanced: [{ zoom: val }] });
-        syncRealHardwareZoomValue();
-        
-        zoomIndicator.classList.add('show');
-        clearTimeout(zoomFadeTimer);
-        zoomFadeTimer = setTimeout(() => {
-          zoomIndicator.classList.remove('show');
-        }, 1000);
-      } catch (e) { console.error("디바이스 줌 하드웨어 바인딩 거부", e); }
-    }
-
-    // ── 뷰파인더 전용 멀티 터치 제스처 인코더 ──
-    let initTouchDist = 0;
-    let initZoomVal = 1.0;
-
-    function getTouchDistance(e) {
-      return Math.hypot(
-        e.touches[0].clientX - e.touches[1].clientX,
-        e.touches[0].clientY - e.touches[1].clientY
-      );
-    }
-
-    viewfinder.addEventListener('touchstart', (e) => {
-      if (e.touches.length === 2 && videoTrack) {
-        initTouchDist = getTouchDistance(e);
-        const settings = videoTrack.getSettings();
-        initZoomVal = settings.zoom || globalZoomVal;
-      }
-    }, { passive: true });
-
-    viewfinder.addEventListener('touchmove', (e) => {
-      if (e.touches.length === 2 && videoTrack && initTouchDist > 0) {
-        e.preventDefault();
-        const currentDist = getTouchDistance(e);
-        const distRatio = currentDist / initTouchDist;
-        
-        applyHardwareZoom(initZoomVal * distRatio);
-      }
-    }, { passive: false });
-
-    viewfinder.addEventListener('touchend', (e) => {
-      if (e.touches.length < 2) initTouchDist = 0;
-    }, { passive: true });
-
-    // 촬영 및 데이터 저장 파이프라인
+    // ── Shutter ───────────────────────────────────────────────
     shutter.addEventListener('click', () => {
       if (!currentStream) return;
-      const vw = viewfinder.videoWidth, vh = viewfinder.videoHeight;
-      canvas.width = vw; canvas.height = vh;
+
+      const vw = viewfinder.videoWidth;
+      const vh = viewfinder.videoHeight;
+      canvas.width  = vw;
+      canvas.height = vh;
       const ctx = canvas.getContext('2d');
 
-      if (facingMode === 'user') { ctx.translate(vw, 0); ctx.scale(-1, 1); }
+      if (facingMode === 'user') {
+        ctx.translate(vw, 0);
+        ctx.scale(-1, 1);
+      }
       ctx.drawImage(viewfinder, 0, 0, vw, vh);
+
       const dataUrl = canvas.toDataURL('image/jpeg', 0.95);
 
-      flash.classList.add('on');
-      setTimeout(() => flash.classList.remove('on'), 100);
+      triggerFlash();
 
-      photosArray.push(dataUrl);
-      if (saveCheckbox.checked) saveImageFile(dataUrl);
-      
+      if (saveCheckbox.checked) {
+        saveImage(dataUrl);
+      }
+      // Whether saving or not, update thumbnail with last shot
       thumbnailEl.src = dataUrl;
       thumbnailEl.style.display = 'block';
     });
 
-    function saveImageFile(dataUrl) {
-      fetch(dataUrl).then(res => res.blob()).then(blob => {
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url; a.download = `IMG_${Date.now()}.jpg`;
-        document.body.appendChild(a); a.click(); document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-        showToast('갤러리에 파일 저장 완료');
-      });
+    function triggerFlash() {
+      flash.classList.add('on');
+      setTimeout(() => flash.classList.remove('on'), 120);
     }
 
+    function saveImage(dataUrl) {
+      const filename = `photo_${formatDatetime()}.jpg`;
+      const a = document.createElement('a');
+      a.href = dataUrl;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      showToast('저장되었습니다');
+    }
+
+    // ── Flip camera ───────────────────────────────────────────
     flipBtn.addEventListener('click', () => {
-      changeCameraDirection(facingMode === 'environment' ? 'user' : 'environment');
+      flipBtn.classList.add('flipping');
+      setTimeout(() => flipBtn.classList.remove('flipping'), 300);
+      const next = facingMode === 'environment' ? 'user' : 'environment';
+      startCamera(next);
     });
 
-    // 임시 모바일 모션 갤러리 뷰어
+    // Thumbnail click → open last photo
     document.getElementById('thumbnail-slot').addEventListener('click', () => {
-      if (photosArray.length === 0) return;
-      swipeContainer.innerHTML = '';
-      photosArray.forEach(src => {
-        const slide = document.createElement('div'); slide.className = 'swipe-slide';
-        const img = document.createElement('img'); img.src = src;
-        slide.appendChild(img); swipeContainer.appendChild(slide);
-      });
-      currentSlideIndex = photosArray.length - 1;
-      moveSlidePosition(false);
-      galleryViewer.style.display = 'block';
+      if (thumbnailEl.src && thumbnailEl.style.display !== 'none') {
+        window.open(thumbnailEl.src, '_blank');
+      }
     });
 
-    viewerClose.addEventListener('click', () => galleryViewer.style.display = 'none');
-    viewerDownload.addEventListener('click', () => {
-      if (photosArray[currentSlideIndex]) saveImageFile(photosArray[currentSlideIndex]);
-    });
-
-    function moveSlidePosition(anim = true) {
-      swipeContainer.style.transition = anim ? 'transform 0.3s cubic-bezier(0.16, 1, 0.3, 1)' : 'none';
-      swipeContainer.style.transform = `translateX(${-currentSlideIndex * window.innerWidth}px)`;
-      viewerCounter.textContent = `${currentSlideIndex + 1} / ${photosArray.length}`;
+    // ── Toast ─────────────────────────────────────────────────
+    function showToast(msg, duration = 1800) {
+      clearTimeout(toastTimer);
+      toastEl.textContent = msg;
+      toastEl.classList.add('show');
+      toastTimer = setTimeout(() => toastEl.classList.remove('show'), duration);
     }
 
-    let startX = 0, isMoving = false, startTime = 0;
-
-    galleryViewer.addEventListener('touchstart', (e) => {
-      startX = e.touches[0].clientX;
-      startTime = Date.now();
-      isMoving = true;
-      swipeContainer.style.transition = 'none';
-    }, { passive: true });
-
-    galleryViewer.addEventListener('touchmove', (e) => {
-      if (!isMoving) return;
-      const diffX = e.touches[0].clientX - startX;
-      e.preventDefault(); 
-      const base = -currentSlideIndex * window.innerWidth;
-      swipeContainer.style.transform = `translateX(${base + diffX}px)`;
-    }, { passive: false });
-
-    galleryViewer.addEventListener('touchend', (e) => {
-      if (!isMoving) return;
-      isMoving = false;
-      const diffX = e.changedTouches[0].clientX - startX;
-      const speed = Math.abs(diffX) / (Date.now() - startTime);
-
-      if ((diffX < -window.innerWidth * 0.35 || speed > 0.4) && currentSlideIndex < photosArray.length - 1) {
-        currentSlideIndex++;
-      } else if ((diffX > window.innerWidth * 0.35 || speed > 0.4) && currentSlideIndex > 0) {
-        currentSlideIndex--;
-      }
-      moveSlidePosition(true);
-    });
-
-    function showToast(msg) {
-      clearTimeout(toastTimer); toastEl.textContent = msg; toastEl.classList.add('show');
-      toastTimer = setTimeout(() => toastEl.classList.remove('show'), 1500);
+    // ── Helpers ───────────────────────────────────────────────
+    function formatDatetime() {
+      const d = new Date();
+      const pad = n => String(n).padStart(2, '0');
+      return `${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
     }
 
     document.addEventListener('contextmenu', e => e.preventDefault());
