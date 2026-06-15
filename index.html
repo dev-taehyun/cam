@@ -33,6 +33,8 @@
       align-items: center;
       justify-content: center;
       background: #000;
+      /* ⭐ 초기 상태를 display: none으로 두고, 권한이 없을 때만 띄우는 역발상 구조 */
+      display: none; 
       z-index: 50;
       gap: 16px;
     }
@@ -256,7 +258,7 @@
     let zoomCaps = { min: 1, max: 1 };
     let globalZoomVal = 1.0;
 
-    // 전체 페이지 확대 제스처 원천 차단
+    // 페이지 확대 제스처 원천 차단
     document.addEventListener('touchstart', (e) => {
       if (e.touches.length > 1) e.preventDefault();
     }, { passive: false });
@@ -274,7 +276,7 @@
 
     saveCheckbox.addEventListener('change', () => saveToggleWrap.classList.toggle('active', saveCheckbox.checked));
 
-    // ── 핵심 카메라 제어 구동 ──
+    // ── ⚡ 초고속 핵심 카메라 제어 파이프라인 ──
     async function initCameraDevice(isSilent = false) {
       if (currentStream) currentStream.getTracks().forEach(t => t.stop());
       
@@ -293,16 +295,19 @@
         await viewfinder.play();
         videoTrack = stream.getVideoTracks()[0];
         
+        // 카메라가 정상 연동되면 즉시 UI 활성화 및 안내 스크린 숨김
         startScreen.style.display = 'none';
         bottomBar.style.display = 'flex';
         
         parseZoomCapabilities();
       } catch (err) {
+        // ⚡ 초고속 선행 시도 중 에러가 나면 비로소 권한 요청 화면을 노출시킴 (레이턴시 최소화)
         if (isSilent) {
-          console.log("자동 진입 실패 (Safari 정책 차단 혹은 권한 미획득)");
+          startScreen.style.display = 'flex';
           return;
         }
 
+        startScreen.style.display = 'flex';
         if (err.name === 'NotAllowedError') {
           startLabel.innerHTML = '카메라 권한이 거부되었습니다.<br>브라우저 설정에서 카메라 접근을 허용해 주세요.';
         } else {
@@ -311,12 +316,13 @@
       }
     }
 
-    // Safari 단골 자동 패스용 진입 이벤트 체인
-    window.addEventListener('load', () => {
-      setTimeout(() => {
-        initCameraDevice(true); 
-      }, 100);
-    });
+    // ── ⚡ [최적화 핵심] 초고속 선행 기동 (Pre-flight Execution) ──
+    // HTML 파싱 및 DOM 빌드가 완료되는 순간(window.load까지 기다리지 않음) 즉시 비동기 스레드 실행
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', () => initCameraDevice(true));
+    } else {
+      initCameraDevice(true);
+    }
 
     openBtn.addEventListener('click', () => {
       initCameraDevice(false);
@@ -339,7 +345,7 @@
       }
     }
 
-    // ⭐ 하드웨어 디바이스 실제 동기화 수치 로드 함수
+    // 하드웨어 디바이스 실제 동기화 수치 로드
     function parseZoomCapabilities() {
       if (!videoTrack) return;
       const capabilities = videoTrack.getCapabilities ? videoTrack.getCapabilities() : {};
@@ -348,7 +354,6 @@
         zoomCaps.min = capabilities.zoom.min || 1;
         zoomCaps.max = capabilities.zoom.max || 5;
         
-        // 가상 값이 아닌 카메라가 직접 보고하고 있는 하드웨어 실제 줌 배율 추출
         const settings = videoTrack.getSettings();
         globalZoomVal = settings.zoom || zoomCaps.min;
         
@@ -358,7 +363,7 @@
       }
     }
 
-    // ⭐ 실제 하드웨어의 미디어 세팅값을 0.1초의 지연 없이 즉시 역추적해 화면에 반영하는 함수
+    // 실제 하드웨어 미디어 세팅값을 실시간 역추적해 화면에 반영
     function syncRealHardwareZoomValue() {
       if (!videoTrack) return;
       const currentSettings = videoTrack.getSettings();
@@ -377,10 +382,7 @@
       globalZoomVal = val;
 
       try {
-        // 하드웨어 모듈에 제스처 가중치 반영 명령 주입
         await videoTrack.applyConstraints({ advanced: [{ zoom: val }] });
-        
-        // 명령 주입 직후, 디바이스가 렌즈를 조절해 실제로 셋업한 리얼 최종 배율을 기기에서 직접 읽어와 표시
         syncRealHardwareZoomValue();
         
         zoomIndicator.classList.add('show');
@@ -405,8 +407,6 @@
     viewfinder.addEventListener('touchstart', (e) => {
       if (e.touches.length === 2 && videoTrack) {
         initTouchDist = getTouchDistance(e);
-        
-        // 제스처가 시작되는 순간에도 기기 고유의 실제 현재 배율을 기준점으로 동기화 세팅
         const settings = videoTrack.getSettings();
         initZoomVal = settings.zoom || globalZoomVal;
       }
