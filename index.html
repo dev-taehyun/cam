@@ -59,7 +59,7 @@
     }
     #open-camera-btn:hover { background: rgba(255,255,255,0.2); }
 
-    /* ── 플로팅 줌 인디케이터 배지 (제스처 시 노출) ── */
+    /* ── 플로팅 줌 인디케이터 배지 ── */
     #zoom-indicator {
       position: fixed;
       top: 15%;
@@ -81,7 +81,7 @@
     }
     #zoom-indicator.show { opacity: 1; }
 
-    /* ── 하단 컨트롤 레이아웃 (휠 제거로 슬림화) ── */
+    /* ── 하단 컨트롤 레이아웃 ── */
     #bottom-bar {
       position: fixed;
       bottom: 0; left: 0; right: 0;
@@ -253,11 +253,10 @@
     let currentStream = null, videoTrack = null, facingMode = 'environment', toastTimer = null, zoomFadeTimer = null;
     let photosArray = [], currentSlideIndex = 0;
     
-    // 내부적 하드웨어 제어용 가상 상태 보관변수
     let zoomCaps = { min: 1, max: 1 };
     let globalZoomVal = 1.0;
 
-    // 브라우저 자체의 핀치 투 줌(웹페이지 전체 확대) 레이어 원천 차단
+    // 전체 페이지 확대 제스처 원천 차단
     document.addEventListener('touchstart', (e) => {
       if (e.touches.length > 1) e.preventDefault();
     }, { passive: false });
@@ -275,7 +274,7 @@
 
     saveCheckbox.addEventListener('change', () => saveToggleWrap.classList.toggle('active', saveCheckbox.checked));
 
-    // ── 카메라 장치 기동 및 Safari 대응 로직 ──
+    // ── 핵심 카메라 제어 구동 ──
     async function initCameraDevice(isSilent = false) {
       if (currentStream) currentStream.getTracks().forEach(t => t.stop());
       
@@ -291,9 +290,7 @@
         
         currentStream = stream;
         viewfinder.srcObject = stream;
-        
         await viewfinder.play();
-        
         videoTrack = stream.getVideoTracks()[0];
         
         startScreen.style.display = 'none';
@@ -302,7 +299,7 @@
         parseZoomCapabilities();
       } catch (err) {
         if (isSilent) {
-          console.log("자동 권한 검사 통과 실패 (사용자 인터랙션 필요)");
+          console.log("자동 진입 실패 (Safari 정책 차단 혹은 권한 미획득)");
           return;
         }
 
@@ -314,7 +311,7 @@
       }
     }
 
-    // Safari 단골 자동 패스 실행 유도
+    // Safari 단골 자동 패스용 진입 이벤트 체인
     window.addEventListener('load', () => {
       setTimeout(() => {
         initCameraDevice(true); 
@@ -342,7 +339,7 @@
       }
     }
 
-    // 하드웨어 지원 스펙 로드
+    // ⭐ 하드웨어 디바이스 실제 동기화 수치 로드 함수
     function parseZoomCapabilities() {
       if (!videoTrack) return;
       const capabilities = videoTrack.getCapabilities ? videoTrack.getCapabilities() : {};
@@ -350,38 +347,51 @@
       if ('zoom' in capabilities) {
         zoomCaps.min = capabilities.zoom.min || 1;
         zoomCaps.max = capabilities.zoom.max || 5;
+        
+        // 가상 값이 아닌 카메라가 직접 보고하고 있는 하드웨어 실제 줌 배율 추출
         const settings = videoTrack.getSettings();
         globalZoomVal = settings.zoom || zoomCaps.min;
+        
+        syncRealHardwareZoomValue(); 
       } else {
-        zoomCaps.min = 1;
-        zoomCaps.max = 1;
-        globalZoomVal = 1.0;
+        zoomCaps.min = 1; zoomCaps.max = 1; globalZoomVal = 1.0;
       }
     }
 
-    // 제스처 기반 하드웨어 실제 줌 적용 연동
+    // ⭐ 실제 하드웨어의 미디어 세팅값을 0.1초의 지연 없이 즉시 역추적해 화면에 반영하는 함수
+    function syncRealHardwareZoomValue() {
+      if (!videoTrack) return;
+      const currentSettings = videoTrack.getSettings();
+      if ('zoom' in currentSettings) {
+        const realHardwareZoom = currentSettings.zoom;
+        zoomIndicator.textContent = realHardwareZoom.toFixed(1) + 'x';
+      }
+    }
+
+    // 제스처 값 하드웨어 인젝션 처리
     async function applyHardwareZoom(val) {
       if (!videoTrack || zoomCaps.min === zoomCaps.max) return;
       
       if (val < zoomCaps.min) val = zoomCaps.min;
-      if (val > zoomCaps.max) val = max;
+      if (val > zoomCaps.max) val = zoomCaps.max;
       globalZoomVal = val;
 
       try {
+        // 하드웨어 모듈에 제스처 가중치 반영 명령 주입
         await videoTrack.applyConstraints({ advanced: [{ zoom: val }] });
         
-        // 제스처 구동 중에만 상단 줌 배지 플로팅 노출 처리
-        zoomIndicator.textContent = val.toFixed(1) + 'x';
-        zoomIndicator.classList.add('show');
+        // 명령 주입 직후, 디바이스가 렌즈를 조절해 실제로 셋업한 리얼 최종 배율을 기기에서 직접 읽어와 표시
+        syncRealHardwareZoomValue();
         
+        zoomIndicator.classList.add('show');
         clearTimeout(zoomFadeTimer);
         zoomFadeTimer = setTimeout(() => {
           zoomIndicator.classList.remove('show');
         }, 1000);
-      } catch (e) { console.error("하드웨어 줌 미지원 또는 반영 오류", e); }
+      } catch (e) { console.error("디바이스 줌 하드웨어 바인딩 거부", e); }
     }
 
-    // ── 뷰파인더 전용 순수 멀티 터치 제스처 연동 로직 ──
+    // ── 뷰파인더 전용 멀티 터치 제스처 인코더 ──
     let initTouchDist = 0;
     let initZoomVal = 1.0;
 
@@ -395,7 +405,10 @@
     viewfinder.addEventListener('touchstart', (e) => {
       if (e.touches.length === 2 && videoTrack) {
         initTouchDist = getTouchDistance(e);
-        initZoomVal = globalZoomVal;
+        
+        // 제스처가 시작되는 순간에도 기기 고유의 실제 현재 배율을 기준점으로 동기화 세팅
+        const settings = videoTrack.getSettings();
+        initZoomVal = settings.zoom || globalZoomVal;
       }
     }, { passive: true });
 
@@ -405,7 +418,6 @@
         const currentDist = getTouchDistance(e);
         const distRatio = currentDist / initTouchDist;
         
-        // 부드러운 하드웨어 줌 배율 누적 연산
         applyHardwareZoom(initZoomVal * distRatio);
       }
     }, { passive: false });
@@ -414,7 +426,7 @@
       if (e.touches.length < 2) initTouchDist = 0;
     }, { passive: true });
 
-    // 촬영 처리
+    // 촬영 및 데이터 저장 파이프라인
     shutter.addEventListener('click', () => {
       if (!currentStream) return;
       const vw = viewfinder.videoWidth, vh = viewfinder.videoHeight;
@@ -450,7 +462,7 @@
       changeCameraDirection(facingMode === 'environment' ? 'user' : 'environment');
     });
 
-    // 임시 갤러리 스와이프 뷰어
+    // 임시 모바일 모션 갤러리 뷰어
     document.getElementById('thumbnail-slot').addEventListener('click', () => {
       if (photosArray.length === 0) return;
       swipeContainer.innerHTML = '';
