@@ -3,6 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="theme-color" content="#000000">
   <title>Gesture Camera</title>
   <style>
@@ -22,7 +24,7 @@
     #flash.on { opacity: 1; }
     #canvas { display: none; }
 
-    /* ── 지정해주신 카메라 권한 요청 화면 스타일 ── */
+    /* ── 카메라 권한 요청 화면 스타일 ── */
     #start-screen {
       position: fixed;
       inset: 0;
@@ -57,80 +59,44 @@
     }
     #open-camera-btn:hover { background: rgba(255,255,255,0.2); }
 
-    /* ── 하단 컨트롤 레이아웃 ── */
+    /* ── 플로팅 줌 인디케이터 배지 (제스처 시 노출) ── */
+    #zoom-indicator {
+      position: fixed;
+      top: 15%;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0, 0, 0, 0.6);
+      color: #fff;
+      padding: 6px 14px;
+      border-radius: 20px;
+      font-size: 14px;
+      font-weight: 600;
+      backdrop-filter: blur(10px);
+      border: 1px solid rgba(255,255,255,0.1);
+      letter-spacing: 0.05em;
+      z-index: 30;
+      opacity: 0;
+      transition: opacity 0.3s ease;
+      pointer-events: none;
+    }
+    #zoom-indicator.show { opacity: 1; }
+
+    /* ── 하단 컨트롤 레이아웃 (휠 제거로 슬림화) ── */
     #bottom-bar {
       position: fixed;
       bottom: 0; left: 0; right: 0;
-      padding-bottom: calc(20px + env(safe-area-inset-bottom));
-      display: none; /* 카메라 허용 전까지 숨김 */
+      padding-bottom: calc(24px + env(safe-area-inset-bottom));
+      display: none; 
       flex-direction: column;
       align-items: center;
       z-index: 20;
-      background: linear-gradient(to top, rgba(0,0,0,0.7) 0%, rgba(0,0,0,0.3) 60%, transparent 100%);
+      background: linear-gradient(to top, rgba(0,0,0,0.8) 0%, rgba(0,0,0,0.2) 70%, transparent 100%);
     }
-
-    /* ── 인체공학 호(Arc)형 줌 컨트롤러 ── */
-    #zoom-arc-wrapper {
-      position: relative;
-      width: 280px;
-      height: 60px;
-      display: none; 
-      justify-content: center;
-      align-items: flex-end;
-      margin-bottom: 10px;
-    }
-    #zoom-badge {
-      position: absolute;
-      top: -10px;
-      background: rgba(255, 255, 255, 0.9);
-      color: #000;
-      padding: 3px 10px;
-      border-radius: 20px;
-      font-size: 12px;
-      font-weight: 700;
-      box-shadow: 0 4px 10px rgba(0,0,0,0.3);
-      letter-spacing: 0.03em;
-      pointer-events: none;
-      z-index: 5;
-    }
-    #zoom-wheel-area {
-      width: 100%;
-      height: 40px;
-      background: rgba(0, 0, 0, 0.4);
-      backdrop-filter: blur(20px);
-      border-radius: 40px;
-      border: 1px solid rgba(255, 255, 255, 0.1);
-      overflow: hidden;
-      position: relative;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
-    #zoom-hidden-slider {
-      position: absolute;
-      width: 100%;
-      height: 100%;
-      opacity: 0;
-      cursor: pointer;
-      z-index: 3;
-    }
-    .wheel-ticks {
-      display: flex;
-      width: 90%;
-      justify-content: space-between;
-      align-items: center;
-      pointer-events: none;
-      opacity: 0.6;
-      transition: transform 0.1s ease-out;
-    }
-    .tick { width: 2px; height: 8px; background: rgba(255,255,255,0.4); border-radius: 1px; }
-    .tick.major { height: 16px; background: #fff; }
-    .tick.center-dot { width: 6px; height: 6px; border-radius: 50%; background: #30d158; }
 
     /* ── 버튼 그룹 ── */
     #action-row {
       width: 100%;
-      padding: 0 32px;
+      padding: 0 36px;
       display: flex;
       align-items: center;
       justify-content: space-between;
@@ -164,8 +130,9 @@
     }
 
     #save-toggle-wrap {
-      display: flex; align-items: center; gap: 8px; margin-bottom: 12px;
-      background: rgba(0,0,0,0.5); padding: 4px 12px; border-radius: 20px;
+      display: flex; align-items: center; gap: 8px; margin-bottom: 20px;
+      background: rgba(0,0,0,0.5); padding: 5px 14px; border-radius: 20px;
+      border: 1px solid rgba(255,255,255,0.08);
     }
     #save-toggle-label { color: rgba(255,255,255,0.6); font-size: 12px; font-weight: 500; }
     #save-toggle-wrap.active #save-toggle-label { color: #fff; }
@@ -176,7 +143,7 @@
     .toggle-thumb { position: absolute; top: 2px; left: 2px; width: 20px; height: 20px; border-radius: 50%; background: #fff; transition: transform 0.2s; }
     #save-toggle input:checked ~ .toggle-thumb { transform: translateX(18px); }
 
-    /* ── 임시 갤러리 뷰어 (Full Overlay) ── */
+    /* ── 임시 갤러리 뷰어 ── */
     #gallery-viewer { position: fixed; inset: 0; background: #000; z-index: 100; display: none; user-select: none; }
     #viewer-header {
       position: absolute; top: 0; left: 0; right: 0; height: 70px; padding: 0 24px;
@@ -213,6 +180,8 @@
     <button id="open-camera-btn">카메라 열기</button>
   </div>
 
+  <div id="zoom-indicator">1.0x</div>
+
   <div id="bottom-bar">
     <div id="save-toggle-wrap">
       <span id="save-toggle-label">자동 저장</span>
@@ -221,24 +190,6 @@
         <span class="toggle-track"></span>
         <span class="toggle-thumb"></span>
       </label>
-    </div>
-
-    <div id="zoom-arc-wrapper">
-      <div id="zoom-badge">1.0x</div>
-      <div id="zoom-wheel-area">
-        <input type="range" id="zoom-hidden-slider" min="1" max="5" step="0.1" value="1">
-        <div class="wheel-ticks">
-          <div class="tick major"></div>
-          <div class="tick"></div>
-          <div class="tick"></div>
-          <div class="tick"></div>
-          <div class="tick center-dot"></div>
-          <div class="tick"></div>
-          <div class="tick"></div>
-          <div class="tick"></div>
-          <div class="tick major"></div>
-        </div>
-      </div>
     </div>
 
     <div id="action-row">
@@ -291,9 +242,7 @@
     const saveToggleWrap = document.getElementById('save-toggle-wrap');
     const toastEl = document.getElementById('toast');
     
-    const zoomArcWrapper = document.getElementById('zoom-arc-wrapper');
-    const zoomHiddenSlider = document.getElementById('zoom-hidden-slider');
-    const zoomBadge = document.getElementById('zoom-badge');
+    const zoomIndicator = document.getElementById('zoom-indicator');
 
     const galleryViewer = document.getElementById('gallery-viewer');
     const swipeContainer = document.getElementById('swipe-container');
@@ -301,10 +250,14 @@
     const viewerDownload = document.getElementById('viewer-download');
     const viewerCounter = document.getElementById('viewer-counter');
 
-    let currentStream = null, videoTrack = null, facingMode = 'environment', toastTimer = null;
+    let currentStream = null, videoTrack = null, facingMode = 'environment', toastTimer = null, zoomFadeTimer = null;
     let photosArray = [], currentSlideIndex = 0;
+    
+    // 내부적 하드웨어 제어용 가상 상태 보관변수
+    let zoomCaps = { min: 1, max: 1 };
+    let globalZoomVal = 1.0;
 
-    // 브라우저 핀치 투 줌(확대/축소 제스처) 원천 차단 로직
+    // 브라우저 자체의 핀치 투 줌(웹페이지 전체 확대) 레이어 원천 차단
     document.addEventListener('touchstart', (e) => {
       if (e.touches.length > 1) e.preventDefault();
     }, { passive: false });
@@ -322,30 +275,54 @@
 
     saveCheckbox.addEventListener('change', () => saveToggleWrap.classList.toggle('active', saveCheckbox.checked));
 
-    // ── 지정해주신 권한 매핑 방식 연동 카메라 기동 로직 ──
-    openBtn.addEventListener('click', async () => {
+    // ── 카메라 장치 기동 및 Safari 대응 로직 ──
+    async function initCameraDevice(isSilent = false) {
       if (currentStream) currentStream.getTracks().forEach(t => t.stop());
       
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
-          audio: false, video: { facingMode: facingMode, width: { ideal: 1920 }, height: { ideal: 1080 } }
+          audio: false, 
+          video: { 
+            facingMode: facingMode, 
+            width: { ideal: 1920 }, 
+            height: { ideal: 1080 } 
+          }
         });
         
         currentStream = stream;
         viewfinder.srcObject = stream;
+        
+        await viewfinder.play();
+        
         videoTrack = stream.getVideoTracks()[0];
         
         startScreen.style.display = 'none';
         bottomBar.style.display = 'flex';
         
-        setupZoomHardware();
+        parseZoomCapabilities();
       } catch (err) {
+        if (isSilent) {
+          console.log("자동 권한 검사 통과 실패 (사용자 인터랙션 필요)");
+          return;
+        }
+
         if (err.name === 'NotAllowedError') {
           startLabel.innerHTML = '카메라 권한이 거부되었습니다.<br>브라우저 설정에서 카메라 접근을 허용해 주세요.';
         } else {
           startLabel.innerText = '카메라를 연결할 수 없습니다.';
         }
       }
+    }
+
+    // Safari 단골 자동 패스 실행 유도
+    window.addEventListener('load', () => {
+      setTimeout(() => {
+        initCameraDevice(true); 
+      }, 100);
+    });
+
+    openBtn.addEventListener('click', () => {
+      initCameraDevice(false);
     });
 
     async function changeCameraDirection(facing) {
@@ -356,59 +333,55 @@
         });
         currentStream = stream;
         viewfinder.srcObject = stream;
+        await viewfinder.play();
         videoTrack = stream.getVideoTracks()[0];
         facingMode = facing;
-        setupZoomHardware();
+        parseZoomCapabilities();
       } catch (e) {
         console.error("카메라 전환 실패", e);
       }
     }
 
-    function setupZoomHardware() {
+    // 하드웨어 지원 스펙 로드
+    function parseZoomCapabilities() {
       if (!videoTrack) return;
       const capabilities = videoTrack.getCapabilities ? videoTrack.getCapabilities() : {};
       
       if ('zoom' in capabilities) {
-        zoomArcWrapper.style.display = 'flex';
-        zoomHiddenSlider.min = capabilities.zoom.min;
-        zoomHiddenSlider.max = capabilities.zoom.max;
-        zoomHiddenSlider.step = capabilities.zoom.step || 0.1;
-        
+        zoomCaps.min = capabilities.zoom.min || 1;
+        zoomCaps.max = capabilities.zoom.max || 5;
         const settings = videoTrack.getSettings();
-        const currentZoom = settings.zoom || capabilities.zoom.min;
-        zoomHiddenSlider.value = currentZoom;
-        updateZoomDisplay(parseFloat(currentZoom));
+        globalZoomVal = settings.zoom || zoomCaps.min;
       } else {
-        zoomArcWrapper.style.display = 'none';
+        zoomCaps.min = 1;
+        zoomCaps.max = 1;
+        globalZoomVal = 1.0;
       }
     }
 
-    async function applyZoomHardware(val) {
-      if (!videoTrack) return;
-      const min = parseFloat(zoomHiddenSlider.min);
-      const max = parseFloat(zoomHiddenSlider.max);
-      if (val < min) val = min;
-      if (val > max) val = max;
+    // 제스처 기반 하드웨어 실제 줌 적용 연동
+    async function applyHardwareZoom(val) {
+      if (!videoTrack || zoomCaps.min === zoomCaps.max) return;
+      
+      if (val < zoomCaps.min) val = zoomCaps.min;
+      if (val > zoomCaps.max) val = max;
+      globalZoomVal = val;
 
       try {
         await videoTrack.applyConstraints({ advanced: [{ zoom: val }] });
-        zoomHiddenSlider.value = val;
-        updateZoomDisplay(val);
-      } catch (e) { console.error(e); }
+        
+        // 제스처 구동 중에만 상단 줌 배지 플로팅 노출 처리
+        zoomIndicator.textContent = val.toFixed(1) + 'x';
+        zoomIndicator.classList.add('show');
+        
+        clearTimeout(zoomFadeTimer);
+        zoomFadeTimer = setTimeout(() => {
+          zoomIndicator.classList.remove('show');
+        }, 1000);
+      } catch (e) { console.error("하드웨어 줌 미지원 또는 반영 오류", e); }
     }
 
-    function updateZoomDisplay(val) {
-      zoomBadge.textContent = val.toFixed(1) + 'x';
-      const percent = (val - zoomHiddenSlider.min) / (zoomHiddenSlider.max - zoomHiddenSlider.min);
-      const moveX = (percent - 0.5) * -50; 
-      document.querySelector('.wheel-ticks').style.transform = `translateX(${moveX}px)`;
-    }
-
-    zoomHiddenSlider.addEventListener('input', () => {
-      applyZoomHardware(parseFloat(zoomHiddenSlider.value));
-    });
-
-    // ── 실제 카메라 스타일의 뷰파인더 멀티 터치 핀치 줌 ──
+    // ── 뷰파인더 전용 순수 멀티 터치 제스처 연동 로직 ──
     let initTouchDist = 0;
     let initZoomVal = 1.0;
 
@@ -422,7 +395,7 @@
     viewfinder.addEventListener('touchstart', (e) => {
       if (e.touches.length === 2 && videoTrack) {
         initTouchDist = getTouchDistance(e);
-        initZoomVal = parseFloat(zoomHiddenSlider.value);
+        initZoomVal = globalZoomVal;
       }
     }, { passive: true });
 
@@ -431,7 +404,9 @@
         e.preventDefault();
         const currentDist = getTouchDistance(e);
         const distRatio = currentDist / initTouchDist;
-        applyZoomHardware(initZoomVal * distRatio);
+        
+        // 부드러운 하드웨어 줌 배율 누적 연산
+        applyHardwareZoom(initZoomVal * distRatio);
       }
     }, { passive: false });
 
@@ -439,8 +414,7 @@
       if (e.touches.length < 2) initTouchDist = 0;
     }, { passive: true });
 
-
-    // ── 촬영 처리 ──
+    // 촬영 처리
     shutter.addEventListener('click', () => {
       if (!currentStream) return;
       const vw = viewfinder.videoWidth, vh = viewfinder.videoHeight;
@@ -476,7 +450,7 @@
       changeCameraDirection(facingMode === 'environment' ? 'user' : 'environment');
     });
 
-    // ── 임시 갤러리 ──
+    // 임시 갤러리 스와이프 뷰어
     document.getElementById('thumbnail-slot').addEventListener('click', () => {
       if (photosArray.length === 0) return;
       swipeContainer.innerHTML = '';
