@@ -42,7 +42,7 @@
     #permission-screen {
       position: fixed; inset: 0;
       background: #000;
-      display: flex;
+      display: none; /* 개선 포인트 2: 최초 로딩 시 권한 창 숨김 처리 */
       flex-direction: column;
       align-items: center;
       justify-content: center;
@@ -414,7 +414,7 @@
       if (caps.zoom?.min != null && caps.zoom?.max != null) {
         zoomMin = caps.zoom.min;
         zoomMax = caps.zoom.max;
-        currentZoom = Math.max(zoomMin, Math.min(1.0, zoomMax));
+        currentZoom = zoomMin; // 개선 포인트 1: 모바일 환경에서 zoomMin이 1보다 클 경우 오동작하는 제한 버그 수정
         zoomSupported = true;
       }
     }
@@ -570,4 +570,4 @@
     });
   </script>
 </body>
-</html>
+</html
