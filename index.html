@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="theme-color" content="#000000">
@@ -20,6 +20,8 @@
       background: #000;
       overflow: hidden;
       font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', sans-serif;
+      -webkit-tap-highlight-color: transparent;
+      touch-action: none; 
     }
 
     /* ── Viewfinder ── */
@@ -30,19 +32,8 @@
       height: 100%;
       object-fit: cover;
       background: #000;
+      z-index: 1;
     }
-
-    /* ── Flash overlay ── */
-    #flash {
-      position: fixed;
-      inset: 0;
-      background: #fff;
-      opacity: 0;
-      pointer-events: none;
-      z-index: 10;
-      transition: opacity 0.05s ease;
-    }
-    #flash.on { opacity: 1; }
 
     /* ── Hidden canvas for capture ── */
     #canvas { display: none; }
@@ -58,6 +49,7 @@
       background: #000;
       z-index: 50;
       gap: 16px;
+      display: none; /* 초고속 선행 기동을 위해 초기에는 숨김 */
     }
 
     #start-screen svg {
@@ -68,6 +60,8 @@
       color: rgba(255,255,255,0.5);
       font-size: 14px;
       letter-spacing: 0.08em;
+      text-align: center;
+      line-height: 1.6;
     }
 
     #open-camera-btn {
@@ -85,16 +79,38 @@
     }
     #open-camera-btn:hover { background: rgba(255,255,255,0.2); }
 
+    /* ── 플로팅 줌 인디케이터 배지 ── */
+    #zoom-indicator {
+      position: fixed;
+      top: 15%;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0, 0, 0, 0.6);
+      color: #fff;
+      padding: 6px 14px;
+      border-radius: 20px;
+      font-size: 14px;
+      font-weight: 600;
+      backdrop-filter: blur(10px);
+      border: 1px solid rgba(255,255,255,0.1);
+      letter-spacing: 0.05em;
+      z-index: 30;
+      opacity: 0;
+      transition: opacity 0.3s ease;
+      pointer-events: none;
+    }
+    #zoom-indicator.show { opacity: 1; }
+
     /* ── Top bar overlay ── */
     #top-bar {
       position: fixed;
       top: 0;
       left: 0;
       right: 0;
-      padding: 24px 20px 0;
+      padding: calc(24px + env(safe-area-inset-top)) 20px 0;
       display: flex;
       align-items: center;
-      justify-content: center; /* 토글을 상단 중앙에 배치 */
+      justify-content: center;
       z-index: 20;
       background: linear-gradient(to bottom, rgba(0,0,0,0.45) 0%, transparent 100%);
     }
@@ -105,7 +121,7 @@
       bottom: 0;
       left: 0;
       right: 0;
-      padding: 0 32px 40px;
+      padding: 0 32px calc(40px + env(safe-area-inset-bottom));
       display: flex;
       align-items: center;
       justify-content: space-between;
@@ -259,21 +275,6 @@
       transform: translate(-50%, -50%) scale(1);
     }
 
-    /* ── Error ── */
-    #error-msg {
-      position: fixed;
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%);
-      color: rgba(255,255,255,0.7);
-      font-size: 14px;
-      text-align: center;
-      padding: 0 32px;
-      z-index: 55;
-      display: none;
-      line-height: 1.6;
-    }
-
     /* Hidden on start screen */
     #top-bar, #bottom-bar { display: none; }
   </style>
@@ -281,8 +282,6 @@
 <body>
 
   <video id="viewfinder" autoplay playsinline muted></video>
-
-  <div id="flash"></div>
 
   <canvas id="canvas"></canvas>
 
@@ -294,6 +293,8 @@
     <span id="start-label">카메라 접근 권한이 필요합니다</span>
     <button id="open-camera-btn">카메라 열기</button>
   </div>
+
+  <div id="zoom-indicator">1.0x</div>
 
   <div id="top-bar">
     <div id="save-toggle-wrap">
@@ -325,14 +326,11 @@
 
   <div id="toast"></div>
 
-  <div id="error-msg"></div>
-
   <script>
     'use strict';
 
     const viewfinder    = document.getElementById('viewfinder');
     const canvas        = document.getElementById('canvas');
-    const flash         = document.getElementById('flash');
     const startScreen   = document.getElementById('start-screen');
     const startLabel    = document.getElementById('start-label');
     const openBtn       = document.getElementById('open-camera-btn');
@@ -344,39 +342,60 @@
     const saveCheckbox  = document.getElementById('save-checkbox');
     const saveToggleWrap = document.getElementById('save-toggle-wrap');
     const toastEl       = document.getElementById('toast');
-    const errorEl       = document.getElementById('error-msg');
+    const zoomIndicator = document.getElementById('zoom-indicator');
 
-    let currentStream = null;
-    let facingMode    = 'environment';
-    let toastTimer    = null;
+    let currentStream = null, videoTrack = null, facingMode = 'environment';
+    let toastTimer = null, zoomFadeTimer = null;
+    let zoomCaps = { min: 1, max: 1 }, globalZoomVal = 1.0;
 
-    // Sync toggle wrapper active class for label color
+    // 모바일 전체 페이지 확대 제스처 원천 차단
+    document.addEventListener('touchstart', (e) => {
+      if (e.touches.length > 1) e.preventDefault();
+    }, { passive: false });
+
+    document.addEventListener('touchmove', (e) => {
+      if (e.touches.length > 1) e.preventDefault();
+    }, { passive: false });
+
+    // 토글 스위치 라벨 색상 바인딩
     saveCheckbox.addEventListener('change', () => {
       saveToggleWrap.classList.toggle('active', saveCheckbox.checked);
     });
 
-    // ── Camera init ──────────────────────────────────────────
-    async function startCamera(facing = facingMode) {
+    // ── Camera 파이프라인 ──────────────────────────────────────────
+    async function startCamera(facing = facingMode, isSilent = false) {
       if (currentStream) {
         currentStream.getTracks().forEach(t => t.stop());
       }
-      const constraints = {
-        audio: false,
-        video: { facingMode: facing, width: { ideal: 1920 }, height: { ideal: 1080 } }
-      };
       try {
-        const stream = await navigator.mediaDevices.getUserMedia(constraints);
-        window.stream = stream;
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: false,
+          video: { facingMode: facing, width: { ideal: 1920 }, height: { ideal: 1080 } }
+        });
         currentStream = stream;
         viewfinder.srcObject = stream;
+        videoTrack = stream.getVideoTracks()[0];
         facingMode = facing;
+
         startScreen.style.display = 'none';
         topBar.style.display = 'flex';
         bottomBar.style.display = 'flex';
-        errorEl.style.display = 'none';
+        
+        parseZoomCapabilities();
       } catch (err) {
+        if (isSilent) {
+          startScreen.style.display = 'flex';
+          return;
+        }
         showError(err);
       }
+    }
+
+    // ⚡ 초고속 선행 기동 (Pre-flight) - DOM이 준비되면 바로 백그라운드 구동 시도
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', () => startCamera(facingMode, true));
+    } else {
+      startCamera(facingMode, true);
     }
 
     function showError(err) {
@@ -392,9 +411,87 @@
       bottomBar.style.display = 'none';
     }
 
-    openBtn.addEventListener('click', () => startCamera('environment'));
+    openBtn.addEventListener('click', () => startCamera('environment', false));
 
-    // ── Shutter ───────────────────────────────────────────────
+    // ── 하드웨어 실제 줌 감지 파이프라인 ────────────────────────────
+    function parseZoomCapabilities() {
+      if (!videoTrack) return;
+      const capabilities = videoTrack.getCapabilities ? videoTrack.getCapabilities() : {};
+      
+      if ('zoom' in capabilities) {
+        zoomCaps.min = capabilities.zoom.min || 1;
+        zoomCaps.max = capabilities.zoom.max || 5;
+        
+        const settings = videoTrack.getSettings();
+        globalZoomVal = settings.zoom || zoomCaps.min;
+        
+        syncRealHardwareZoomValue(); 
+      } else {
+        zoomCaps.min = 1; zoomCaps.max = 1; globalZoomVal = 1.0;
+      }
+    }
+
+    function syncRealHardwareZoomValue() {
+      if (!videoTrack) return;
+      const currentSettings = videoTrack.getSettings();
+      if ('zoom' in currentSettings) {
+        zoomIndicator.textContent = currentSettings.zoom.toFixed(1) + 'x';
+      }
+    }
+
+    async function applyHardwareZoom(val) {
+      if (!videoTrack || zoomCaps.min === zoomCaps.max) return;
+      
+      if (val < zoomCaps.min) val = zoomCaps.min;
+      if (val > zoomCaps.max) val = zoomCaps.max;
+      globalZoomVal = val;
+
+      try {
+        await videoTrack.applyConstraints({ advanced: [{ zoom: val }] });
+        syncRealHardwareZoomValue(); // 하드웨어가 셋업한 리얼 배율을 받아와서 매핑
+        
+        zoomIndicator.classList.add('show');
+        clearTimeout(zoomFadeTimer);
+        zoomFadeTimer = setTimeout(() => {
+          zoomIndicator.classList.remove('show');
+        }, 1000);
+      } catch (e) { console.error("디바이스 하드웨어 줌 바인딩 실패", e); }
+    }
+
+    // ── 핀치 투 줌 멀티터치 제스처 엔지니어링 ──
+    let initTouchDist = 0;
+    let initZoomVal = 1.0;
+
+    function getTouchDistance(e) {
+      return Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY
+      );
+    }
+
+    viewfinder.addEventListener('touchstart', (e) => {
+      if (e.touches.length === 2 && videoTrack) {
+        initTouchDist = getTouchDistance(e);
+        const settings = videoTrack.getSettings();
+        initZoomVal = settings.zoom || globalZoomVal;
+      }
+    }, { passive: true });
+
+    viewfinder.addEventListener('touchmove', (e) => {
+      if (e.touches.length === 2 && videoTrack && initTouchDist > 0) {
+        e.preventDefault();
+        const currentDist = getTouchDistance(e);
+        const distRatio = currentDist / initTouchDist;
+        
+        applyHardwareZoom(initZoomVal * distRatio);
+      }
+    }, { passive: false });
+
+    viewfinder.addEventListener('touchend', (e) => {
+      if (e.touches.length < 2) initTouchDist = 0;
+    }, { passive: true });
+
+    // ── Shutter (⭐섬광 효과 완벽 제거) ───────────────────────────────
     shutter.addEventListener('click', () => {
       if (!currentStream) return;
 
@@ -412,20 +509,13 @@
 
       const dataUrl = canvas.toDataURL('image/jpeg', 0.95);
 
-      triggerFlash();
-
       if (saveCheckbox.checked) {
         saveImage(dataUrl);
       }
-      // Whether saving or not, update thumbnail with last shot
+
       thumbnailEl.src = dataUrl;
       thumbnailEl.style.display = 'block';
     });
-
-    function triggerFlash() {
-      flash.classList.add('on');
-      setTimeout(() => flash.classList.remove('on'), 120);
-    }
 
     function saveImage(dataUrl) {
       const filename = `photo_${formatDatetime()}.jpg`;
@@ -443,7 +533,7 @@
       flipBtn.classList.add('flipping');
       setTimeout(() => flipBtn.classList.remove('flipping'), 300);
       const next = facingMode === 'environment' ? 'user' : 'environment';
-      startCamera(next);
+      startCamera(next, false);
     });
 
     // Thumbnail click → open last photo
