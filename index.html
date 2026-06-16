@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -24,7 +24,8 @@
       background: #000;
       font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Helvetica Neue', sans-serif;
       overscroll-behavior: none;
-      /* touch-action은 절대 none 금지 — 핀치줌 막힘 */
+      /* ⚡ 변경 포인트 2: body 전체에 touch-action 주입 후, 제스처가 필요한 갤러리에만 개별 허용 */
+      touch-action: none; 
     }
 
     /* ── Viewfinder ── */
@@ -33,7 +34,6 @@
       width: 100%; height: 100%;
       object-fit: cover;
       background: #000;
-      /* pointer-events 제거 — 핀치가 video 위에서 동작해야 함 */
     }
 
     #canvas { display: none; }
@@ -42,7 +42,7 @@
     #permission-screen {
       position: fixed; inset: 0;
       background: #000;
-      display: none; /* 개선 포인트 2: 최초 로딩 시 권한 창 숨김 처리 */
+      display: none; 
       flex-direction: column;
       align-items: center;
       justify-content: center;
@@ -109,7 +109,6 @@
       flex-direction: column; align-items: center;
       z-index: 30;
       background: linear-gradient(to top, rgba(0,0,0,0.65) 0%, transparent 100%);
-      /* 버튼만 pointer-events 받도록 */
       pointer-events: none;
     }
 
@@ -199,8 +198,8 @@
     #gallery-viewer {
       position: fixed; inset: 0; background: #000;
       z-index: 100; display: none;
-      /* 갤러리에서는 스와이프 허용 */
-      touch-action: pan-x;
+      /* ⚡ 변경 포인트 3: body는 touch-action이 막혔으므로 갤러리 뷰어만 가로 스와이프 허용 */
+      touch-action: pan-x; 
     }
     #viewer-header {
       position: absolute; top: 0; left: 0; right: 0;
@@ -348,13 +347,10 @@
     let zoomSupported = false;
     let zoomHideTimer = null;
 
-    /* ── 텍스트/이미지 블록 선택, 우클릭 메뉴, 드래그만 차단
-       핀치줌 / 스크롤 touch 이벤트는 절대 막지 않음 ── */
     document.addEventListener('contextmenu',  e => e.preventDefault());
     document.addEventListener('selectstart',  e => e.preventDefault());
     document.addEventListener('dragstart',    e => e.preventDefault());
 
-    /* 더블탭으로 브라우저 UI 줌 방지 (핀치와 무관) */
     let lastTap = 0;
     document.addEventListener('touchend', e => {
       const now = Date.now();
@@ -362,35 +358,56 @@
       lastTap = now;
     }, { passive: false });
 
-    /* ── 권한 검사: getUserMedia를 바로 시도
-       권한이 이미 있으면 팝업 없이 스트림이 즉시 반환됨.
-       permissions.query 같은 async 사전 조회를 안 하기 때문에 딜레이가 없음.
-       권한이 없거나 거부되면 catch → showPermScreen 호출. ── */
-    if (!navigator.mediaDevices?.getUserMedia) {
-      showPermScreen('이 브라우저는 카메라를 지원하지 않습니다.');
-    } else {
-      startCamera(facingMode);
-    }
+    // ── ⚡ 핀치 제스처 시 브라우저 기본 확대 기능 강제 파괴 (핵심 최적화) ──
+    document.addEventListener('touchstart', e => {
+      if (e.touches.length > 1) {
+        // 두 손가락 이상이 닿으면 브라우저의 줌 이벤트를 원천 취소합니다.
+        e.preventDefault(); 
+      }
+    }, { passive: false }); // 👈 passive: false가 필수적입니다.
 
-    /* ── Camera ── */
-    async function startCamera(facing) {
-      if (currentStream) { currentStream.getTracks().forEach(t => t.stop()); currentStream = null; }
+    document.addEventListener('touchmove', e => {
+      if (e.touches.length > 1) {
+        // 멀티터치 이동(핀치) 시 브라우저 화면이 커지는 동작을 완벽히 차단합니다.
+        e.preventDefault();
+      }
+    }, { passive: false });
+
+
+    async function startCamera(facing, isSilent = false) {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        showPermScreen('이 브라우저는 카메라를 지원하지 않습니다.');
+        return;
+      }
+
+      if (currentStream) { 
+        currentStream.getTracks().forEach(t => t.stop()); 
+        currentStream = null; 
+      }
+      
       facingMode = facing;
+      
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
-          audio: false,
+          audio: false, 
           video: { facingMode: facing, width: { ideal: 9999 }, height: { ideal: 9999 }, frameRate: { ideal: 60 } }
         });
+        
         currentStream = stream;
         viewfinder.srcObject = stream;
         zoomTrack = stream.getVideoTracks()[0];
         initZoom();
+        
         permScreen.style.display = 'none';
         topBar.style.display     = 'flex';
         bottomBar.style.display  = 'flex';
       } catch (err) {
+        if (isSilent) {
+          showPermScreen();
+          return;
+        }
+
         if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
-          // 권한 거부 → 허가 요청 화면
           showPermScreen('카메라 권한이 거부되었습니다.\n브라우저 설정에서 카메라 접근을 허용해 주세요.');
         } else {
           handleCameraError(err);
@@ -398,14 +415,20 @@
       }
     }
 
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', () => startCamera(facingMode, true));
+    } else {
+      startCamera(facingMode, true);
+    }
+
     function checkAndResumeCamera() {
       if (galleryViewer.style.display === 'block') return;
       if (permScreen.style.display !== 'none') return;
       const t = currentStream?.getVideoTracks()[0];
-      if (!t || t.readyState === 'ended' || viewfinder.paused) startCamera(facingMode);
+      if (!t || t.readyState === 'ended' || viewfinder.paused) startCamera(facingMode, false);
     }
 
-    /* ── Zoom: 핀치 제스처 → 실제 카메라 zoom API ── */
+    /* ── Zoom ── */
     function initZoom() {
       zoomSupported = false;
       currentZoom = 1.0; zoomMin = 1.0; zoomMax = 1.0;
@@ -414,7 +437,7 @@
       if (caps.zoom?.min != null && caps.zoom?.max != null) {
         zoomMin = caps.zoom.min;
         zoomMax = caps.zoom.max;
-        currentZoom = zoomMin; // 개선 포인트 1: 모바일 환경에서 zoomMin이 1보다 클 경우 오동작하는 제한 버그 수정
+        currentZoom = zoomMin; 
         zoomSupported = true;
       }
     }
@@ -427,16 +450,15 @@
       return Math.hypot(dx, dy);
     }
 
-    /* 핀치 시작: 2손가락이 화면에 닿았을 때 */
+    // ⚡ 브라우저 기본 기능은 막고, 순수 하드웨어 Zoom 값 수동 연산 인터셉트
     document.addEventListener('touchstart', e => {
       if (e.touches.length === 2 && zoomSupported) {
         pinchActive    = true;
         pinchStartDist = getTouchDist(e.touches);
         pinchStartZoom = currentZoom;
       }
-    }, { passive: true });
+    }, { passive: false }); // 👈 인터셉트를 위해 passive false 유지
 
-    /* 핀치 진행: 비율 계산 후 zoom 변경 시에만 API 호출 */
     document.addEventListener('touchmove', e => {
       if (!pinchActive || e.touches.length !== 2) return;
       const dist  = getTouchDist(e.touches);
@@ -446,7 +468,7 @@
         currentZoom = newZ;
         applyZoom(newZ);
       }
-    }, { passive: true });
+    }, { passive: false });
 
     document.addEventListener('touchend', e => {
       if (e.touches.length < 2) pinchActive = false;
@@ -496,7 +518,7 @@
     flipBtn.addEventListener('click', () => {
       flipBtn.classList.add('spinning');
       setTimeout(() => flipBtn.classList.remove('spinning'), 350);
-      startCamera(facingMode === 'environment' ? 'user' : 'environment');
+      startCamera(facingMode === 'environment' ? 'user' : 'environment', false);
     });
 
     /* ── Gallery ── */
@@ -555,7 +577,7 @@
       const m = { NotAllowedError: '카메라 권한이 거부되었습니다.\n브라우저 설정에서 카메라 접근을 허용해 주세요.', NotFoundError: '사용 가능한 카메라를 찾을 수 없습니다.', NotReadableError: '카메라가 다른 앱에서 사용 중입니다.' };
       showPermScreen(m[err.name] || '카메라를 열 수 없습니다.');
     }
-    openBtn.addEventListener('click', () => startCamera(facingMode));
+    openBtn.addEventListener('click', () => startCamera(facingMode, false));
 
     /* ── Toast ── */
     function showToast(msg, ms = 1800) {
@@ -570,4 +592,4 @@
     });
   </script>
 </body>
-</html
+</html>
