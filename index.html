@@ -324,7 +324,6 @@
 <body>
 
   <video id="viewfinder" autoplay playsinline muted></video>
-
   <canvas id="canvas"></canvas>
 
   <div id="start-screen">
@@ -383,7 +382,6 @@
   </div>
 
   <div id="toast"></div>
-
   <div id="error-msg"></div>
 
   <script>
@@ -404,7 +402,6 @@
     const toastEl       = document.getElementById('toast');
     const errorEl       = document.getElementById('error-msg');
 
-    // 갤러리 파이프라인 요소 바인딩
     const galleryViewer = document.getElementById('gallery-viewer');
     const swipeContainer = document.getElementById('swipe-container');
     const viewerClose   = document.getElementById('viewer-close');
@@ -415,16 +412,20 @@
     let facingMode    = 'environment';
     let toastTimer    = null;
     
-    // 찍은 사진 데이터를 저장할 스택 배열 및 포인터 인덱스
     let photosArray   = []; 
     let currentSlideIndex = 0;
 
-    // Sync toggle wrapper active class for label color
+    // Helpers 함수 위치 상단 조정 (호이스팅 에러 방지)
+    function formatDatetime() {
+      const d = new Date();
+      const pad = n => String(n).padStart(2, '0');
+      return `${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+    }
+
     saveCheckbox.addEventListener('change', () => {
       saveToggleWrap.classList.toggle('active', saveCheckbox.checked);
     });
 
-    // 뷰포트 확대 간섭 제어 방어코드
     document.addEventListener('touchstart', (e) => {
       if (e.touches.length > 1) e.preventDefault();
     }, { passive: false });
@@ -468,7 +469,7 @@
 
     openBtn.addEventListener('click', () => startCamera('environment'));
 
-    // ── Shutter (플래시 없이 셔터 딜레이 제로 즉시 기록) ───────────────────
+    // ── Shutter ───────────────────
     shutter.addEventListener('click', () => {
       if (!currentStream) return;
 
@@ -486,7 +487,7 @@
 
       const dataUrl = canvas.toDataURL('image/jpeg', 0.95);
 
-      // 배열에 촬영 데이터 영구 인젝션
+      // 배열에 촬영 데이터 무조건 인젝션 (저장 여부 상관 없음)
       photosArray.push(dataUrl);
 
       if (saveCheckbox.checked) {
@@ -532,8 +533,12 @@
       
       // 최신 사진을 먼저 띄우도록 마지막 인덱스 셋업
       currentSlideIndex = photosArray.length - 1;
-      moveSlidePosition(false);
       galleryViewer.style.display = 'block';
+      
+      // 고정 마진 버그 방지용 강제 렌더링 동기화
+      setTimeout(() => {
+        moveSlidePosition(false);
+      }, 50);
     });
 
     viewerClose.addEventListener('click', () => {
@@ -554,17 +559,21 @@
 
     let startX = 0, isMoving = false, startTime = 0;
 
+    // 모바일 하이 프레임 워크 패시브 리스너 해제 { passive: false }
     galleryViewer.addEventListener('touchstart', (e) => {
       startX = e.touches[0].clientX;
       startTime = Date.now();
       isMoving = true;
       swipeContainer.style.transition = 'none';
-    }, { passive: true });
+    }, { passive: false });
 
     galleryViewer.addEventListener('touchmove', (e) => {
       if (!isMoving) return;
       const diffX = e.touches[0].clientX - startX;
-      e.preventDefault(); 
+      
+      // 리스너가 { passive: false } 일 때만 작동하도록 에러 방어
+      if (e.cancelable) e.preventDefault(); 
+      
       const base = -currentSlideIndex * window.innerWidth;
       swipeContainer.style.transform = `translateX(${base + diffX}px)`;
     }, { passive: false });
@@ -575,7 +584,6 @@
       const diffX = e.changedTouches[0].clientX - startX;
       const speed = Math.abs(diffX) / (Date.now() - startTime);
 
-      // 관성 스와이프 또는 물리 드래그 트리거 처리
       if ((diffX < -window.innerWidth * 0.35 || speed > 0.4) && currentSlideIndex < photosArray.length - 1) {
         currentSlideIndex++;
       } else if ((diffX > window.innerWidth * 0.35 || speed > 0.4) && currentSlideIndex > 0) {
@@ -590,13 +598,6 @@
       toastEl.textContent = msg;
       toastEl.classList.add('show');
       toastTimer = setTimeout(() => toastEl.classList.remove('show'), duration);
-    }
-
-    // ── Helpers ───────────────────────────────────────────────
-    function formatDatetime() {
-      const d = new Date();
-      const pad = n => String(n).padStart(2, '0');
-      return `${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
     }
 
     document.addEventListener('contextmenu', e => e.preventDefault());
