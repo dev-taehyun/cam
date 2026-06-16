@@ -20,7 +20,6 @@
       background: #000;
       overflow: hidden;
       font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', sans-serif;
-      -webkit-tap-highlight-color: transparent;
       touch-action: none; 
     }
 
@@ -32,7 +31,6 @@
       height: 100%;
       object-fit: cover;
       background: #000;
-      z-index: 1;
     }
 
     /* ── Hidden canvas for capture ── */
@@ -49,7 +47,6 @@
       background: #000;
       z-index: 50;
       gap: 16px;
-      display: none; /* 초고속 선행 기동을 위해 초기에는 숨김 */
     }
 
     #start-screen svg {
@@ -60,8 +57,6 @@
       color: rgba(255,255,255,0.5);
       font-size: 14px;
       letter-spacing: 0.08em;
-      text-align: center;
-      line-height: 1.6;
     }
 
     #open-camera-btn {
@@ -79,40 +74,17 @@
     }
     #open-camera-btn:hover { background: rgba(255,255,255,0.2); }
 
-    /* ── 플로팅 줌 인디케이터 배지 ── */
-    #zoom-indicator {
-      position: fixed;
-      top: 15%;
-      left: 50%;
-      transform: translateX(-50%);
-      background: rgba(0, 0, 0, 0.6);
-      color: #fff;
-      padding: 6px 14px;
-      border-radius: 20px;
-      font-size: 14px;
-      font-weight: 600;
-      backdrop-filter: blur(10px);
-      border: 1px solid rgba(255,255,255,0.1);
-      letter-spacing: 0.05em;
-      z-index: 30;
-      opacity: 0;
-      transition: opacity 0.3s ease;
-      pointer-events: none;
-    }
-    #zoom-indicator.show { opacity: 1; }
-
     /* ── Top bar overlay ── */
     #top-bar {
       position: fixed;
       top: 0;
       left: 0;
       right: 0;
-      padding: calc(24px + env(safe-area-inset-top)) 20px 0;
+      padding: 24px 20px 0;
       display: flex;
       align-items: center;
-      justify-content: center;
+      justify-content: center; 
       z-index: 20;
-      background: linear-gradient(to bottom, rgba(0,0,0,0.45) 0%, transparent 100%);
     }
 
     /* ── Bottom controls overlay ── */
@@ -121,7 +93,7 @@
       bottom: 0;
       left: 0;
       right: 0;
-      padding: 0 32px calc(40px + env(safe-area-inset-bottom));
+      padding: 0 32px 40px;
       display: flex;
       align-items: center;
       justify-content: space-between;
@@ -251,6 +223,60 @@
       transform: translateX(18px);
     }
 
+    /* ── 임시 갤러리 뷰어 레이아웃 ── */
+    #gallery-viewer {
+      position: fixed;
+      inset: 0;
+      background: #000;
+      z-index: 100;
+      display: none;
+      user-select: none;
+    }
+    #viewer-header {
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 70px;
+      padding: 0 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: linear-gradient(to bottom, rgba(0,0,0,0.6), transparent);
+      z-index: 110;
+    }
+    #viewer-close, #viewer-download {
+      background: transparent;
+      border: none;
+      cursor: pointer;
+      filter: drop-shadow(0 2px 4px rgba(0,0,0,0.8));
+    }
+    #viewer-counter {
+      color: #fff;
+      font-size: 16px;
+      font-weight: 600;
+      text-shadow: 0 2px 4px rgba(0,0,0,0.8);
+    }
+    #swipe-container {
+      display: flex;
+      width: 100%;
+      height: 100%;
+      will-change: transform;
+    }
+    .swipe-slide {
+      min-width: 100%;
+      width: 100%;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+    }
+    .swipe-slide img {
+      max-width: 100%;
+      max-height: 100%;
+      object-fit: contain;
+      pointer-events: none;
+    }
+
     /* ── Toast ── */
     #toast {
       position: fixed;
@@ -264,7 +290,7 @@
       font-size: 14px;
       font-weight: 500;
       letter-spacing: 0.03em;
-      z-index: 60;
+      z-index: 120;
       opacity: 0;
       pointer-events: none;
       backdrop-filter: blur(10px);
@@ -273,6 +299,21 @@
     #toast.show {
       opacity: 1;
       transform: translate(-50%, -50%) scale(1);
+    }
+
+    /* ── Error ── */
+    #error-msg {
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      color: rgba(255,255,255,0.7);
+      font-size: 14px;
+      text-align: center;
+      padding: 0 32px;
+      z-index: 55;
+      display: none;
+      line-height: 1.6;
     }
 
     /* Hidden on start screen */
@@ -293,8 +334,6 @@
     <span id="start-label">카메라 접근 권한이 필요합니다</span>
     <button id="open-camera-btn">카메라 열기</button>
   </div>
-
-  <div id="zoom-indicator">1.0x</div>
 
   <div id="top-bar">
     <div id="save-toggle-wrap">
@@ -324,7 +363,27 @@
     </button>
   </div>
 
+  <div id="gallery-viewer">
+    <div id="viewer-header">
+      <button id="viewer-close" aria-label="닫기">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5">
+          <line x1="18" y1="6" x2="6" y2="18"></line>
+          <line x1="6" y1="6" x2="18" y2="18"></line>
+        </svg>
+      </button>
+      <div id="viewer-counter">0 / 0</div>
+      <button id="viewer-download" aria-label="다운로드">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v4M7 10l5 5 5-5M12 15V3"></path>
+        </svg>
+      </button>
+    </div>
+    <div id="swipe-container"></div>
+  </div>
+
   <div id="toast"></div>
+
+  <div id="error-msg"></div>
 
   <script>
     'use strict';
@@ -342,60 +401,54 @@
     const saveCheckbox  = document.getElementById('save-checkbox');
     const saveToggleWrap = document.getElementById('save-toggle-wrap');
     const toastEl       = document.getElementById('toast');
-    const zoomIndicator = document.getElementById('zoom-indicator');
+    const errorEl       = document.getElementById('error-msg');
 
-    let currentStream = null, videoTrack = null, facingMode = 'environment';
-    let toastTimer = null, zoomFadeTimer = null;
-    let zoomCaps = { min: 1, max: 1 }, globalZoomVal = 1.0;
+    // 갤러리 내부 전용 변수 파이프라인
+    const galleryViewer = document.getElementById('gallery-viewer');
+    const swipeContainer = document.getElementById('swipe-container');
+    const viewerClose   = document.getElementById('viewer-close');
+    const viewerDownload = document.getElementById('viewer-download');
+    const viewerCounter  = document.getElementById('viewer-counter');
 
-    // 모바일 전체 페이지 확대 제스처 원천 차단
-    document.addEventListener('touchstart', (e) => {
-      if (e.touches.length > 1) e.preventDefault();
-    }, { passive: false });
+    let currentStream = null;
+    let facingMode    = 'environment';
+    let toastTimer    = null;
+    
+    let photosArray   = []; 
+    let currentSlideIndex = 0;
 
-    document.addEventListener('touchmove', (e) => {
-      if (e.touches.length > 1) e.preventDefault();
-    }, { passive: false });
-
-    // 토글 스위치 라벨 색상 바인딩
+    // Sync toggle wrapper active class for label color
     saveCheckbox.addEventListener('change', () => {
       saveToggleWrap.classList.toggle('active', saveCheckbox.checked);
     });
 
-    // ── Camera 파이프라인 ──────────────────────────────────────────
-    async function startCamera(facing = facingMode, isSilent = false) {
+    // 전체 모바일 뷰 배율 제스처 엉킴 원천 방어 락킹
+    document.addEventListener('touchstart', (e) => {
+      if (e.touches.length > 1) e.preventDefault();
+    }, { passive: false });
+
+    // ── Camera init ──────────────────────────────────────────
+    async function startCamera(facing = facingMode) {
       if (currentStream) {
         currentStream.getTracks().forEach(t => t.stop());
       }
+      const constraints = {
+        audio: false,
+        video: { facingMode: facing, width: { ideal: 1920 }, height: { ideal: 1080 } }
+      };
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          audio: false,
-          video: { facingMode: facing, width: { ideal: 1920 }, height: { ideal: 1080 } }
-        });
+        const stream = await navigator.mediaDevices.getUserMedia(constraints);
+        window.stream = stream;
         currentStream = stream;
         viewfinder.srcObject = stream;
-        videoTrack = stream.getVideoTracks()[0];
         facingMode = facing;
-
         startScreen.style.display = 'none';
         topBar.style.display = 'flex';
         bottomBar.style.display = 'flex';
-        
-        parseZoomCapabilities();
+        errorEl.style.display = 'none';
       } catch (err) {
-        if (isSilent) {
-          startScreen.style.display = 'flex';
-          return;
-        }
         showError(err);
       }
-    }
-
-    // ⚡ 초고속 선행 기동 (Pre-flight) - DOM이 준비되면 바로 백그라운드 구동 시도
-    if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', () => startCamera(facingMode, true));
-    } else {
-      startCamera(facingMode, true);
     }
 
     function showError(err) {
@@ -411,87 +464,9 @@
       bottomBar.style.display = 'none';
     }
 
-    openBtn.addEventListener('click', () => startCamera('environment', false));
+    openBtn.addEventListener('click', () => startCamera('environment'));
 
-    // ── 하드웨어 실제 줌 감지 파이프라인 ────────────────────────────
-    function parseZoomCapabilities() {
-      if (!videoTrack) return;
-      const capabilities = videoTrack.getCapabilities ? videoTrack.getCapabilities() : {};
-      
-      if ('zoom' in capabilities) {
-        zoomCaps.min = capabilities.zoom.min || 1;
-        zoomCaps.max = capabilities.zoom.max || 5;
-        
-        const settings = videoTrack.getSettings();
-        globalZoomVal = settings.zoom || zoomCaps.min;
-        
-        syncRealHardwareZoomValue(); 
-      } else {
-        zoomCaps.min = 1; zoomCaps.max = 1; globalZoomVal = 1.0;
-      }
-    }
-
-    function syncRealHardwareZoomValue() {
-      if (!videoTrack) return;
-      const currentSettings = videoTrack.getSettings();
-      if ('zoom' in currentSettings) {
-        zoomIndicator.textContent = currentSettings.zoom.toFixed(1) + 'x';
-      }
-    }
-
-    async function applyHardwareZoom(val) {
-      if (!videoTrack || zoomCaps.min === zoomCaps.max) return;
-      
-      if (val < zoomCaps.min) val = zoomCaps.min;
-      if (val > zoomCaps.max) val = zoomCaps.max;
-      globalZoomVal = val;
-
-      try {
-        await videoTrack.applyConstraints({ advanced: [{ zoom: val }] });
-        syncRealHardwareZoomValue(); // 하드웨어가 셋업한 리얼 배율을 받아와서 매핑
-        
-        zoomIndicator.classList.add('show');
-        clearTimeout(zoomFadeTimer);
-        zoomFadeTimer = setTimeout(() => {
-          zoomIndicator.classList.remove('show');
-        }, 1000);
-      } catch (e) { console.error("디바이스 하드웨어 줌 바인딩 실패", e); }
-    }
-
-    // ── 핀치 투 줌 멀티터치 제스처 엔지니어링 ──
-    let initTouchDist = 0;
-    let initZoomVal = 1.0;
-
-    function getTouchDistance(e) {
-      return Math.hypot(
-        e.touches[0].clientX - e.touches[1].clientX,
-        e.touches[0].clientY - e.touches[1].clientY
-      );
-    }
-
-    viewfinder.addEventListener('touchstart', (e) => {
-      if (e.touches.length === 2 && videoTrack) {
-        initTouchDist = getTouchDistance(e);
-        const settings = videoTrack.getSettings();
-        initZoomVal = settings.zoom || globalZoomVal;
-      }
-    }, { passive: true });
-
-    viewfinder.addEventListener('touchmove', (e) => {
-      if (e.touches.length === 2 && videoTrack && initTouchDist > 0) {
-        e.preventDefault();
-        const currentDist = getTouchDistance(e);
-        const distRatio = currentDist / initTouchDist;
-        
-        applyHardwareZoom(initZoomVal * distRatio);
-      }
-    }, { passive: false });
-
-    viewfinder.addEventListener('touchend', (e) => {
-      if (e.touches.length < 2) initTouchDist = 0;
-    }, { passive: true });
-
-    // ── Shutter (⭐섬광 효과 완벽 제거) ───────────────────────────────
+    // ── Shutter ───────────────────────────────────────────────
     shutter.addEventListener('click', () => {
       if (!currentStream) return;
 
@@ -509,15 +484,18 @@
 
       const dataUrl = canvas.toDataURL('image/jpeg', 0.95);
 
-      if (saveCheckbox.checked) {
-        saveImage(dataUrl);
-      }
+      // 복원된 데이터 세그먼트 배열 주입
+      photosArray.push(dataUrl);
 
+      if (saveCheckbox.checked) {
+        saveImage(dataUrl, false);
+      }
+      
       thumbnailEl.src = dataUrl;
       thumbnailEl.style.display = 'block';
     });
 
-    function saveImage(dataUrl) {
+    function saveImage(dataUrl, showToastFlag = true) {
       const filename = `photo_${formatDatetime()}.jpg`;
       const a = document.createElement('a');
       a.href = dataUrl;
@@ -525,7 +503,7 @@
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
-      showToast('저장되었습니다');
+      if (showToastFlag) showToast('저장되었습니다');
     }
 
     // ── Flip camera ───────────────────────────────────────────
@@ -533,14 +511,73 @@
       flipBtn.classList.add('flipping');
       setTimeout(() => flipBtn.classList.remove('flipping'), 300);
       const next = facingMode === 'environment' ? 'user' : 'environment';
-      startCamera(next, false);
+      startCamera(next);
     });
 
-    // Thumbnail click → open last photo
+    // ── 임시 갤러리 모달 내부 구동 및 스와이프 제어 엔진 ──
     document.getElementById('thumbnail-slot').addEventListener('click', () => {
-      if (thumbnailEl.src && thumbnailEl.style.display !== 'none') {
-        window.open(thumbnailEl.src, '_blank');
+      if (photosArray.length === 0) return;
+      
+      swipeContainer.innerHTML = '';
+      photosArray.forEach(src => {
+        const slide = document.createElement('div');
+        slide.className = 'swipe-slide';
+        const img = document.createElement('img');
+        img.src = src;
+        slide.appendChild(img);
+        swipeContainer.appendChild(slide);
+      });
+      
+      currentSlideIndex = photosArray.length - 1;
+      moveSlidePosition(false);
+      galleryViewer.style.display = 'block';
+    });
+
+    viewerClose.addEventListener('click', () => {
+      galleryViewer.style.display = 'none';
+    });
+
+    viewerDownload.addEventListener('click', () => {
+      if (photosArray[currentSlideIndex]) {
+        saveImage(photosArray[currentSlideIndex], true);
       }
+    });
+
+    function moveSlidePosition(anim = true) {
+      swipeContainer.style.transition = anim ? 'transform 0.3s cubic-bezier(0.16, 1, 0.3, 1)' : 'none';
+      swipeContainer.style.transform = `translateX(${-currentSlideIndex * window.innerWidth}px)`;
+      viewerCounter.textContent = `${currentSlideIndex + 1} / ${photosArray.length}`;
+    }
+
+    let startX = 0, isMoving = false, startTime = 0;
+
+    galleryViewer.addEventListener('touchstart', (e) => {
+      startX = e.touches[0].clientX;
+      startTime = Date.now();
+      isMoving = true;
+      swipeContainer.style.transition = 'none';
+    }, { passive: true });
+
+    galleryViewer.addEventListener('touchmove', (e) => {
+      if (!isMoving) return;
+      const diffX = e.touches[0].clientX - startX;
+      e.preventDefault(); 
+      const base = -currentSlideIndex * window.innerWidth;
+      swipeContainer.style.transform = `translateX(${base + diffX}px)`;
+    }, { passive: false });
+
+    galleryViewer.addEventListener('touchend', (e) => {
+      if (!isMoving) return;
+      isMoving = false;
+      const diffX = e.changedTouches[0].clientX - startX;
+      const speed = Math.abs(diffX) / (Date.now() - startTime);
+
+      if ((diffX < -window.innerWidth * 0.35 || speed > 0.4) && currentSlideIndex < photosArray.length - 1) {
+        currentSlideIndex++;
+      } else if ((diffX > window.innerWidth * 0.35 || speed > 0.4) && currentSlideIndex > 0) {
+        currentSlideIndex--;
+      }
+      moveSlidePosition(true);
     });
 
     // ── Toast ─────────────────────────────────────────────────
