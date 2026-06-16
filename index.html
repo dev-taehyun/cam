@@ -114,54 +114,28 @@
       padding-bottom: 8px;
     }
 
-    /* ── Zoom Bar ── */
-    #zoom-bar {
+    /* ── Zoom indicator (pinch-to-zoom) ── */
+    #zoom-indicator {
       position: fixed;
-      bottom: 170px;
-      left: 0;
-      right: 0;
-      display: none;
-      align-items: center;
-      justify-content: center;
-      z-index: 25;
-      pointer-events: none;
-    }
-
-    #zoom-pill {
-      display: flex;
-      align-items: center;
-      gap: 4px;
-      background: rgba(0,0,0,0.48);
+      bottom: 178px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0,0,0,0.52);
       backdrop-filter: blur(16px) saturate(1.4);
       -webkit-backdrop-filter: blur(16px) saturate(1.4);
       border-radius: 100px;
-      padding: 6px 8px;
-      pointer-events: all;
-    }
-
-    .zoom-btn {
-      background: transparent;
-      border: none;
-      color: #fff;
-      font-size: 13px;
-      font-weight: 500;
-      letter-spacing: -0.1px;
-      padding: 4px 10px;
-      border-radius: 100px;
-      cursor: pointer;
-      min-width: 44px;
-      text-align: center;
-      transition: background 0.15s, color 0.15s;
-      pointer-events: all;
-    }
-    .zoom-btn.active {
-      background: rgba(255,255,255,0.22);
+      padding: 6px 16px;
       color: #FFD60A;
+      font-size: 15px;
       font-weight: 600;
+      letter-spacing: 0.01em;
+      z-index: 25;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.3s ease;
+      white-space: nowrap;
     }
-    .zoom-btn:active {
-      background: rgba(255,255,255,0.15);
-    }
+    #zoom-indicator.visible { opacity: 1; }
 
     /* ── Bottom Bar ── */
     #bottom-bar {
@@ -183,7 +157,7 @@
       display: flex;
       align-items: center;
       gap: 10px;
-      margin-bottom: 18px;
+      margin-bottom: 10px;
       pointer-events: all;
     }
 
@@ -434,10 +408,8 @@
   <!-- Top bar -->
   <div id="top-bar"></div>
 
-  <!-- Zoom bar -->
-  <div id="zoom-bar">
-    <div id="zoom-pill"></div>
-  </div>
+  <!-- Zoom indicator (pinch gesture) -->
+  <div id="zoom-indicator">1.0×</div>
 
   <!-- Bottom bar -->
   <div id="bottom-bar">
@@ -496,8 +468,6 @@
     const permScreen      = document.getElementById('permission-screen');
     const openBtn         = document.getElementById('open-camera-btn');
     const topBar          = document.getElementById('top-bar');
-    const zoomBar         = document.getElementById('zoom-bar');
-    const zoomPill        = document.getElementById('zoom-pill');
     const bottomBar       = document.getElementById('bottom-bar');
     const shutter         = document.getElementById('shutter');
     const flipBtn         = document.getElementById('flip-btn');
@@ -509,6 +479,7 @@
     const viewerDownload  = document.getElementById('viewer-download');
     const viewerCounter   = document.getElementById('viewer-counter');
     const toastEl         = document.getElementById('toast');
+    const zoomIndicator   = document.getElementById('zoom-indicator');
 
     /* ── State ── */
     let currentStream     = null;
@@ -518,25 +489,27 @@
     let toastTimer        = null;
 
     /* Zoom state */
-    let availableZoomLevels = [];  // e.g. [0.5, 1, 2]
-    let currentZoomIndex    = 0;
-    let zoomTrack           = null; // the actual video track
+    let zoomTrack         = null;
+    let currentZoom       = 1.0;
+    let zoomMin           = 1.0;
+    let zoomMax           = 1.0;
+    let zoomSupported     = false;
+    let zoomHideTimer     = null;
 
     /* ─────────────────────────────────────────
        GLOBAL GESTURE BLOCK
-       Prevent: scroll, pinch-zoom, text select,
-       context menu, double-tap zoom
+       - 브라우저 스와이프/확대/텍스트선택/사진블록 전부 차단
+       - 갤러리 내부 스와이프는 별도 핸들러에서 허용
     ───────────────────────────────────────── */
-    document.addEventListener('touchstart',  e => { if (e.touches.length > 1) e.preventDefault(); }, { passive: false });
-    document.addEventListener('touchmove',   e => e.preventDefault(), { passive: false });
-    document.addEventListener('gesturestart',e => e.preventDefault(), { passive: false });
-    document.addEventListener('gesturechange',e=> e.preventDefault(), { passive: false });
-    document.addEventListener('gestureend',  e => e.preventDefault(), { passive: false });
-    document.addEventListener('contextmenu', e => e.preventDefault());
-    document.addEventListener('selectstart', e => e.preventDefault());
-    document.addEventListener('dragstart',   e => e.preventDefault());
+    document.addEventListener('touchmove',    e => e.preventDefault(), { passive: false });
+    document.addEventListener('gesturestart', e => e.preventDefault(), { passive: false });
+    document.addEventListener('gesturechange',e => e.preventDefault(), { passive: false });
+    document.addEventListener('gestureend',   e => e.preventDefault(), { passive: false });
+    document.addEventListener('contextmenu',  e => e.preventDefault());
+    document.addEventListener('selectstart',  e => e.preventDefault());
+    document.addEventListener('dragstart',    e => e.preventDefault());
 
-    /* Prevent double-tap zoom */
+    /* 더블탭 줌 방지 */
     let lastTap = 0;
     document.addEventListener('touchend', e => {
       const now = Date.now();
@@ -545,34 +518,23 @@
     }, { passive: false });
 
     /* ─────────────────────────────────────────
-       PERMISSION CHECK ON LOAD
-       Query permission state first; if already
-       granted, skip the request UI entirely.
+       PERMISSION CHECK — 스크립트 파싱 즉시 실행
+       (load 이벤트 대기 없음 → 권한 있으면 카메라 먼저)
     ───────────────────────────────────────── */
-    async function initOnLoad() {
-      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        showPermScreen('이 브라우저는 카메라를 지원하지 않습니다.');
-        return;
+    (async function initImmediate() {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        showPermScreen('이 브라우저는 카메라를 지원하지 않습니다.'); return;
       }
-
-      // Permissions API supported?
-      if (navigator.permissions && navigator.permissions.query) {
+      if (navigator.permissions?.query) {
         try {
-          const result = await navigator.permissions.query({ name: 'camera' });
-          if (result.state === 'granted') {
-            await startCamera(facingMode);
-            return;
+          const res = await navigator.permissions.query({ name: 'camera' });
+          if (res.state === 'granted') {
+            startCamera(facingMode); return;
           }
-        } catch (_) {
-          // Permissions API not supported for camera on this UA — fall through
-        }
+        } catch (_) {}
       }
-
-      // Not granted or unknown: show permission screen
       showPermScreen();
-    }
-
-    window.addEventListener('load', initOnLoad);
+    })();
 
     /* ─────────────────────────────────────────
        CAMERA
@@ -582,125 +544,124 @@
         currentStream.getTracks().forEach(t => t.stop());
         currentStream = null;
       }
-
       facingMode = facing;
 
-      // Max quality constraints
-      const constraints = {
-        audio: false,
-        video: {
-          facingMode: facing,
-          width:  { ideal: 9999 },
-          height: { ideal: 9999 },
-          frameRate: { ideal: 60 }
-        }
-      };
-
       try {
-        const stream = await navigator.mediaDevices.getUserMedia(constraints);
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: false,
+          video: {
+            facingMode: facing,
+            width:  { ideal: 9999 },
+            height: { ideal: 9999 },
+            frameRate: { ideal: 60 }
+          }
+        });
         currentStream = stream;
         viewfinder.srcObject = stream;
 
         zoomTrack = stream.getVideoTracks()[0];
+        initZoom();
 
-        // Show UI
-        permScreen.style.display  = 'none';
-        topBar.style.display      = 'flex';
-        bottomBar.style.display   = 'flex';
-
-        await buildZoomControls();
+        permScreen.style.display = 'none';
+        topBar.style.display     = 'flex';
+        bottomBar.style.display  = 'flex';
 
       } catch (err) {
         handleCameraError(err);
       }
     }
 
-    /* Recover stream if it dies */
     function checkAndResumeCamera() {
       if (galleryViewer.style.display === 'block') return;
       if (permScreen.style.display !== 'none') return;
-
-      const track = currentStream ? currentStream.getVideoTracks()[0] : null;
+      const track = currentStream?.getVideoTracks()[0];
       if (!track || track.readyState === 'ended' || viewfinder.paused) {
         startCamera(facingMode);
       }
     }
 
     /* ─────────────────────────────────────────
-       ZOOM — read real device optical levels
+       ZOOM — 핀치 제스처로 실제 카메라 zoom 조절
+       변경 시에만 applyConstraints 호출 + 배율 표시
     ───────────────────────────────────────── */
-    async function buildZoomControls() {
-      zoomPill.innerHTML = '';
-      availableZoomLevels = [];
-      zoomBar.style.display = 'none';
+    function initZoom() {
+      zoomSupported = false;
+      currentZoom   = 1.0;
+      zoomMin       = 1.0;
+      zoomMax       = 1.0;
 
-      if (!zoomTrack) return;
-
-      const caps = zoomTrack.getCapabilities ? zoomTrack.getCapabilities() : {};
-
-      /* Build candidate zoom levels from device capabilities */
-      let levels = [];
-
-      // Android / some browsers expose camera.zoom range
-      if (caps.zoom && caps.zoom.min != null && caps.zoom.max != null) {
-        const min = caps.zoom.min;
-        const max = caps.zoom.max;
-
-        // Typical telephoto steps: 0.5 (ultra), 1 (wide), 2, 3, 5
-        const candidates = [0.5, 1, 2, 3, 5];
-        candidates.forEach(v => {
-          if (v >= min && v <= max) levels.push(v);
-        });
-        if (levels.length === 0) levels = [min, 1, max].filter((v, i, a) => a.indexOf(v) === i);
-
-        // Clamp: at most 5 buttons
-        if (levels.length > 5) levels = levels.slice(0, 5);
-
-        levels.forEach((z, i) => {
-          const btn = document.createElement('button');
-          btn.className = 'zoom-btn' + (i === 0 ? ' active' : '');
-          btn.textContent = formatZoom(z);
-          btn.addEventListener('click', () => applyZoom(z, btn));
-          zoomPill.appendChild(btn);
-        });
-
-        availableZoomLevels = levels;
-        currentZoomIndex = 0;
-        zoomBar.style.display = 'flex';
-
-        // Apply default (1× if available, else first)
-        const defaultIdx = levels.indexOf(1) !== -1 ? levels.indexOf(1) : 0;
-        const defaultBtn = zoomPill.querySelectorAll('.zoom-btn')[defaultIdx];
-        if (defaultBtn) applyZoom(levels[defaultIdx], defaultBtn);
-
-      } else {
-        // Zoom API not available — hide bar silently
-        zoomBar.style.display = 'none';
+      if (!zoomTrack?.getCapabilities) return;
+      const caps = zoomTrack.getCapabilities();
+      if (caps.zoom?.min != null && caps.zoom?.max != null) {
+        zoomMin       = caps.zoom.min;
+        zoomMax       = caps.zoom.max;
+        currentZoom   = Math.max(zoomMin, Math.min(1.0, zoomMax));
+        zoomSupported = true;
       }
     }
 
-    function formatZoom(z) {
-      if (z === Math.floor(z)) return `${z}×`;
-      return `${z}×`;
+    /* 핀치 추적 변수 */
+    let pinchActive   = false;
+    let pinchStartDist= 0;
+    let pinchStartZoom= 1.0;
+
+    function pinchDist(touches) {
+      const dx = touches[0].clientX - touches[1].clientX;
+      const dy = touches[0].clientY - touches[1].clientY;
+      return Math.hypot(dx, dy);
     }
 
-    async function applyZoom(level, btnEl) {
-      // Update button states
-      zoomPill.querySelectorAll('.zoom-btn').forEach(b => b.classList.remove('active'));
-      if (btnEl) btnEl.classList.add('active');
+    /* 뷰파인더 영역에만 핀치 리스너 (갤러리와 분리) */
+    viewfinder.addEventListener('touchstart', e => {
+      if (e.touches.length === 2 && zoomSupported) {
+        pinchActive    = true;
+        pinchStartDist = pinchDist(e.touches);
+        pinchStartZoom = currentZoom;
+        e.preventDefault();
+      }
+    }, { passive: false });
 
-      if (!zoomTrack || !zoomTrack.applyConstraints) return;
+    /* document-level touchmove는 이미 preventDefault 되어 있으므로
+       viewfinder에 별도로 핀치 처리 리스너를 추가 */
+    viewfinder.addEventListener('touchmove', e => {
+      if (!pinchActive || e.touches.length !== 2) return;
+      const dist  = pinchDist(e.touches);
+      const ratio = dist / pinchStartDist;
+      const newZ  = Math.max(zoomMin, Math.min(zoomMax, pinchStartZoom * ratio));
+
+      /* 소수점 1자리 단위 변화가 있을 때만 apply */
+      if (Math.abs(newZ - currentZoom) >= 0.05) {
+        currentZoom = newZ;
+        applyZoom(currentZoom);
+      }
+      e.preventDefault();
+    }, { passive: false });
+
+    viewfinder.addEventListener('touchend', e => {
+      if (e.touches.length < 2) pinchActive = false;
+    }, { passive: true });
+
+    async function applyZoom(level) {
+      if (!zoomTrack?.applyConstraints) return;
       try {
         await zoomTrack.applyConstraints({ advanced: [{ zoom: level }] });
-      } catch (_) { /* Zoom not settable on this device */ }
+      } catch (_) {}
+      showZoomIndicator(level);
+    }
+
+    function showZoomIndicator(level) {
+      const label = level % 1 === 0 ? `${level}×` : `${level.toFixed(1)}×`;
+      zoomIndicator.textContent = label;
+      zoomIndicator.classList.add('visible');
+      clearTimeout(zoomHideTimer);
+      zoomHideTimer = setTimeout(() => zoomIndicator.classList.remove('visible'), 1500);
     }
 
     /* ─────────────────────────────────────────
-       SHUTTER — capture at native resolution
+       SHUTTER
     ───────────────────────────────────────── */
     shutter.addEventListener('click', () => {
       if (!currentStream) return;
-
       const vw = viewfinder.videoWidth;
       const vh = viewfinder.videoHeight;
       if (!vw || !vh) return;
@@ -708,24 +669,14 @@
       canvas.width  = vw;
       canvas.height = vh;
       const ctx = canvas.getContext('2d');
-
-      if (facingMode === 'user') {
-        ctx.translate(vw, 0);
-        ctx.scale(-1, 1);
-      }
+      if (facingMode === 'user') { ctx.translate(vw, 0); ctx.scale(-1, 1); }
       ctx.drawImage(viewfinder, 0, 0, vw, vh);
 
-      // Quality 1.0 = maximum JPEG
       const dataUrl = canvas.toDataURL('image/jpeg', 1.0);
-
       photosArray.push(dataUrl);
-
       thumbnailEl.src = dataUrl;
       thumbnailEl.style.display = 'block';
-
-      if (saveCheckbox.checked) {
-        saveImage(dataUrl, false);
-      }
+      if (saveCheckbox.checked) saveImage(dataUrl, false);
     });
 
     /* ─────────────────────────────────────────
@@ -736,7 +687,6 @@
       const d = new Date();
       return `${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
     }
-
     function saveImage(dataUrl, toast = true) {
       const a = document.createElement('a');
       a.href = dataUrl;
@@ -762,7 +712,6 @@
     ───────────────────────────────────────── */
     document.getElementById('thumbnail-slot').addEventListener('click', () => {
       if (photosArray.length === 0) return;
-
       swipeContainer.innerHTML = '';
       photosArray.forEach(src => {
         const slide = document.createElement('div');
@@ -772,7 +721,6 @@
         slide.appendChild(img);
         swipeContainer.appendChild(slide);
       });
-
       currentSlideIndex = photosArray.length - 1;
       galleryViewer.style.display = 'block';
       setTimeout(() => moveSlide(false), 30);
@@ -782,77 +730,57 @@
       galleryViewer.style.display = 'none';
       setTimeout(checkAndResumeCamera, 100);
     });
-
     viewerDownload.addEventListener('click', () => {
       if (photosArray[currentSlideIndex]) saveImage(photosArray[currentSlideIndex], true);
     });
 
     function moveSlide(animate = true) {
       swipeContainer.style.transition = animate
-        ? 'transform 0.3s cubic-bezier(0.16, 1, 0.3, 1)'
-        : 'none';
-      swipeContainer.style.transform = `translateX(${-currentSlideIndex * window.innerWidth}px)`;
+        ? 'transform 0.3s cubic-bezier(0.16, 1, 0.3, 1)' : 'none';
+      swipeContainer.style.transform  = `translateX(${-currentSlideIndex * window.innerWidth}px)`;
       viewerCounter.textContent = `${currentSlideIndex + 1} / ${photosArray.length}`;
     }
 
-    /* Swipe gesture for gallery */
-    let swipeStartX = 0, swipeStartTime = 0, swipeLive = false;
-
+    /* 갤러리 스와이프 (touchmove는 여기선 passive:false 불가→ 위치만 계산) */
+    let swX = 0, swT = 0, swLive = false;
     galleryViewer.addEventListener('touchstart', e => {
-      if (e.touches.length === 1) {
-        swipeStartX    = e.touches[0].clientX;
-        swipeStartTime = Date.now();
-        swipeLive      = true;
-        swipeContainer.style.transition = 'none';
-      }
+      if (e.touches.length === 1) { swX = e.touches[0].clientX; swT = Date.now(); swLive = true; swipeContainer.style.transition = 'none'; }
       e.stopPropagation();
     }, { passive: true });
-
     galleryViewer.addEventListener('touchmove', e => {
-      if (!swipeLive || e.touches.length !== 1) return;
-      const dx = e.touches[0].clientX - swipeStartX;
-      const base = -currentSlideIndex * window.innerWidth;
-      swipeContainer.style.transform = `translateX(${base + dx}px)`;
+      if (!swLive || e.touches.length !== 1) return;
+      const dx = e.touches[0].clientX - swX;
+      swipeContainer.style.transform = `translateX(${-currentSlideIndex * window.innerWidth + dx}px)`;
       e.stopPropagation();
     }, { passive: true });
-
     galleryViewer.addEventListener('touchend', e => {
-      if (!swipeLive) return;
-      swipeLive = false;
-      const dx    = e.changedTouches[0].clientX - swipeStartX;
-      const speed = Math.abs(dx) / Math.max(Date.now() - swipeStartTime, 1);
-      const threshold = window.innerWidth * 0.3;
-
-      if ((dx < -threshold || (dx < -20 && speed > 0.5)) && currentSlideIndex < photosArray.length - 1) {
-        currentSlideIndex++;
-      } else if ((dx > threshold || (dx > 20 && speed > 0.5)) && currentSlideIndex > 0) {
-        currentSlideIndex--;
-      }
+      if (!swLive) return; swLive = false;
+      const dx = e.changedTouches[0].clientX - swX;
+      const sp = Math.abs(dx) / Math.max(Date.now() - swT, 1);
+      const th = window.innerWidth * 0.3;
+      if ((dx < -th || (dx < -20 && sp > 0.5)) && currentSlideIndex < photosArray.length - 1) currentSlideIndex++;
+      else if ((dx > th || (dx > 20 && sp > 0.5)) && currentSlideIndex > 0) currentSlideIndex--;
       moveSlide(true);
       e.stopPropagation();
     }, { passive: true });
 
     /* ─────────────────────────────────────────
-       PERMISSION SCREEN HELPER
+       PERMISSION / ERROR HELPERS
     ───────────────────────────────────────── */
     function showPermScreen(msg) {
-      permScreen.style.display  = 'flex';
-      topBar.style.display      = 'none';
-      bottomBar.style.display   = 'none';
-      zoomBar.style.display     = 'none';
-      if (msg) {
-        document.querySelector('.perm-desc').textContent = msg;
-      }
+      permScreen.style.display = 'flex';
+      topBar.style.display     = 'none';
+      bottomBar.style.display  = 'none';
+      if (msg) document.querySelector('.perm-desc').textContent = msg;
     }
-
     function handleCameraError(err) {
-      let desc = '카메라를 열 수 없습니다.';
-      if (err.name === 'NotAllowedError')  desc = '카메라 권한이 거부되었습니다.\n브라우저 설정에서 카메라 접근을 허용해 주세요.';
-      if (err.name === 'NotFoundError')    desc = '사용 가능한 카메라를 찾을 수 없습니다.';
-      if (err.name === 'NotReadableError') desc = '카메라가 다른 앱에서 사용 중입니다.';
-      showPermScreen(desc);
+      const map = {
+        NotAllowedError:  '카메라 권한이 거부되었습니다.\n브라우저 설정에서 카메라 접근을 허용해 주세요.',
+        NotFoundError:    '사용 가능한 카메라를 찾을 수 없습니다.',
+        NotReadableError: '카메라가 다른 앱에서 사용 중입니다.'
+      };
+      showPermScreen(map[err.name] || '카메라를 열 수 없습니다.');
     }
-
     openBtn.addEventListener('click', () => startCamera(facingMode));
 
     /* ─────────────────────────────────────────
@@ -866,12 +794,10 @@
     }
 
     /* ─────────────────────────────────────────
-       BACKGROUND / VISIBILITY RECOVERY
+       VISIBILITY / RECOVERY
     ───────────────────────────────────────── */
     document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'visible') {
-        setTimeout(checkAndResumeCamera, 200);
-      }
+      if (document.visibilityState === 'visible') setTimeout(checkAndResumeCamera, 200);
     });
   </script>
 </body>
